@@ -50,12 +50,7 @@ if(!require('dplyr'))
 # def process_list(my_list):
 #         return my_list
 # ")
-py_run_string("
-def process_r_vector(input_vector):
-    print('Received object type in Python:', type(input_vector))
-    print('Received Python list:', input_vector)
-    return input_vector
-")
+
 env_name <- "tcrdist3_env"
 
 # --- Python Environment Setup ---
@@ -77,3 +72,10 @@ tryCatch({
     #conda_remove(env_name)
     stop("Quiting")
 })
+
+py_run_string("
+def process_r_vector(input_vector):
+    print('Received object type in Python:', type(input_vector))
+    print('Received Python list:', input_vector)
+    return input_vector
+")
