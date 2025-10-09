@@ -1,4 +1,5 @@
-Sys.setenv(PATH = paste(normalizePath("~/local/bin"),Sys.getenv("PATH"), sep = ":"))
+source("checkConda.R")
+#Sys.setenv(PATH = paste(normalizePath("~/local/bin"),Sys.getenv("PATH"), sep = ":"))
 if(!require("reticulate"))
 {
   install.packages("reticulate",dependencies = TRUE)

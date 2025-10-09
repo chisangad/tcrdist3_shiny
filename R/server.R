@@ -339,7 +339,9 @@ server <- function(input, output, session) {
       tryCatch({
         tr<-analysis_results()
         req(tr)
+        incProgress(0.1, detail = "Importing libraries...")
         TCRtree<-import("tcrdist.tree")
+        incProgress(0.3, detail = "Preparing data...")
         tcrtree = TCRtree$TCRtree(tcrrep = tr, html_name = 'dash.mouse.b.tree.html')
         tcrtree$build_tree()
         incProgress(0.9, detail = "Finalizing...")
