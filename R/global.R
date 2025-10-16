@@ -1,5 +1,4 @@
 source("checkConda.R")
-#Sys.setenv(PATH = paste(normalizePath("~/local/bin"),Sys.getenv("PATH"), sep = ":"))
 if(!require("reticulate"))
 {
   install.packages("reticulate",dependencies = TRUE)
@@ -45,7 +44,11 @@ if(!require('dplyr'))
   install.packages("dplyr")
   library("dplyr")
 } 
-
+if(!require(shinyFeedback))
+{
+  install.packages("shinyFeedback")
+  library(shinyFeedback)
+}
   
 # py_run_string("
 # def process_list(my_list):

@@ -39,7 +39,9 @@ ui <- fluidPage(
         condition = "output.csvtest",
         hr(),
         h4("3. Run Analysis"),
-        actionButton("run", "Run TCRdist3"),
+        actionButton("run", HTML(
+          "<span class='glyphicon glyphicon-play-circle'></span> Run TCRdist3"
+        )),
       ),
       hr(),
       h4("Input File Format"),
@@ -76,8 +78,6 @@ ui <- fluidPage(
                  ))),
         tabPanel("Gene Level Analyses",
                  hr(),
-                 p("Loading a TCR dataset will immediately enable gene-level analyses of repertoires, for example Sankey plots of V/D/J gene frequency or statistical tests for differential gene enrichment in two or more conditions:"),
-                 hr(),
                  uiOutput("col_select_ui"),
                  uiOutput("btn_gensankey_ui"),
                  hr(),
@@ -93,7 +93,10 @@ ui <- fluidPage(
                      hr(),
                      numericInput("knn_radius",label = "KNN radius",value = 150),
                      br(),
-                     actionButton("run_fixn","Run KNN"),
+                     actionButton("run_fixn",
+                                  HTML(
+                                    "<span class='glyphicon glyphicon-play-circle'></span> Run KNN"
+                                  )),
                      hr(),
                      DT::dataTableOutput("fixedradius_output"),
                      hr()
@@ -101,36 +104,50 @@ ui <- fluidPage(
                   tabPanel(
                      "Hierarchical Neighbourhoods",
                      hr(),
-                     actionButton("run_Hierarch","Run Hierarchical"),
+                     actionButton("run_Hierarch",HTML(
+                                    "<span class='glyphicon glyphicon-play-circle'></span> Run Hierarchical"
+                                  )),
                      hr(),
-                     htmlOutput("hierachy_output_plot"),
-                     DT::dataTableOutput("hierachy_output")
+                     tabsetPanel(
+                       id="hierarch_tabs",
+                       tabPanel(
+                         "Cluster diagram",
+                         uiOutput("hierachy_output_plot")
+                       ),
+                       tabPanel(
+                         "Table",
+                         DT::dataTableOutput("hierachy_output")
+                       )
+                     )
                    )
                   )
                  ),
         tabPanel(
           "Trees",
           hr(),
-          actionButton("run_trees","Get Trees"),
+          actionButton("run_trees",
+                       HTML("<span class='glyphicon glyphicon-play-circle'></span> Get Trees")),
+          hr(),
+          uiOutput("tree_output_plot"),
           hr(),
         ),
         tabPanel("Export Results",
                  hr(),
                  p("")
         ),
-        # tabPanel("About", 
-        #          h4("About this App"),
-        #          p("This Shiny app provides an interface to the `tcrdist3` Python package for TCR sequence analysis."),
-        #          p("`tcrdist3` is a powerful tool for calculating distances between TCRs, which can be used to identify clusters of functionally related receptors."),
-        #          p("For more information on `tcrdist3`, please see the official documentation: ", 
-        #            a("https://tcrdist3.readthedocs.io/", href = "https://tcrdist3.readthedocs.io/")),
-        #          h4("How to Cite"),
-        #          p("If you use this tool in your research, please cite the `tcrdist3` publication:"),
-        #          p("Mayer-Blackwell, K., Schattgen, S., Cohen-Lavi, L., Crawford, J. C., Souquette, A., Gaevert, J., ... & Bradley, P. (2021). 
-        #            Flexible distance-based T-cell receptor analysis in Python with tcrdist3. bioRxiv.")
-        # )
+        tabPanel("About",
+                 h4("About this App"),
+                 p("This Shiny app provides an interface to the `tcrdist3` Python package for TCR sequence analysis."),
+                 p("`tcrdist3` is a powerful tool for calculating distances between TCRs, which can be used to identify clusters of functionally related receptors."),
+                 p("For more information on `tcrdist3`, please see the official documentation: ",
+                   a("https://tcrdist3.readthedocs.io/", href = "https://tcrdist3.readthedocs.io/")),
+                 #h4("How to Cite"),
+                 # p("If you use this tool in your research, please cite the `tcrdist3` publication:"),
+                 # p("Mayer-Blackwell, K., Schattgen, S., Cohen-Lavi, L., Crawford, J. C., Souquette, A., Gaevert, J., ... & Bradley, P. (2021).
+                 #   Flexible distance-based T-cell receptor analysis in Python with tcrdist3. bioRxiv.")
+        )
       ),
-      htmlOutput("errorreport")
+        htmlOutput("errorreport") #useShinyFeedback()
     )
   )
 )

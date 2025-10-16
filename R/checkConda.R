@@ -6,7 +6,7 @@ check_and_install_miniconda <- function() {
     return(invisible(TRUE))
   }
   
-  message("Miniconda is not found. Attempting to download and install... ⏳")
+  message("Miniconda not found. Attempting to download and install... ⏳")
   
   # Define installation paths and filenames
   if (Sys.info()["sysname"] == "Windows") {
@@ -55,5 +55,5 @@ check_and_install_miniconda <- function() {
   }
 }
 
-# Run the function
+# Run the check and install function
 check_and_install_miniconda()
