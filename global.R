@@ -1,4 +1,4 @@
-source("checkConda.R")
+#source("checkConda.R")
 if(!require("reticulate"))
 {
   install.packages("reticulate",dependencies = TRUE)
@@ -49,12 +49,6 @@ if(!require(shinyFeedback))
   install.packages("shinyFeedback")
   library(shinyFeedback)
 }
-if(!require(shinyWidgets))
-{
-  install.packages("shinyWidgets")
-  library(shinyWidgets)
-}
-
 
 # py_run_string("
 # def process_list(my_list):
@@ -78,9 +72,9 @@ tryCatch({
   }
   use_condaenv(env_name)
 }, error = function(e) {
-    message(paste0("Error initialising conda environment - ",e))
-    #conda_remove(env_name)
-    stop("Quiting")
+  message(paste0("Error initialising conda environment - ",e))
+  #conda_remove(env_name)
+  stop("Quiting")
 })
 
 py_run_string("

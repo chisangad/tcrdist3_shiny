@@ -3,7 +3,7 @@
 # the 'Run App' button above.
 #
 
-source("global.R")
+#source("global.R")
 
 # --- UI Definition ---
 ui <- fluidPage(
@@ -54,28 +54,28 @@ ui <- fluidPage(
       tabsetPanel(
         tabPanel("TCR Distance",
                  conditionalPanel(condition = "output.csvtest",
-                 tabsetPanel(
-                   tabPanel(
-                     "Summary",
-                     tags$br(),
-                     DT::dataTableOutput("summary_matrix")
-                   ),
-                   tabPanel(
-                     "Clones",
-                     tags$br(),
-                     DT::dataTableOutput("clone_matrix"),
-                     hr(),
-                     downloadButton("download_data", "Download Clone Matrix")
-                   ),
-                   tabPanel(
-                     "Heatmap", 
-                      uiOutput("matrixoptions"),
-                      hr(),
-                      plotOutput("heatmap", height = "800px"),
-                      hr(),
-                      DT::dataTableOutput("dist_matrix")
-                      )
-                 ))),
+                                  tabsetPanel(
+                                    tabPanel(
+                                      "Summary",
+                                      tags$br(),
+                                      DT::dataTableOutput("summary_matrix")
+                                    ),
+                                    tabPanel(
+                                      "Clones",
+                                      tags$br(),
+                                      DT::dataTableOutput("clone_matrix"),
+                                      hr(),
+                                      downloadButton("download_data", "Download Clone Matrix")
+                                    ),
+                                    tabPanel(
+                                      "Heatmap", 
+                                      uiOutput("matrixoptions"),
+                                      hr(),
+                                      plotOutput("heatmap", height = "800px"),
+                                      hr(),
+                                      DT::dataTableOutput("dist_matrix")
+                                    )
+                                  ))),
         tabPanel("Gene Level Analyses",
                  hr(),
                  uiOutput("col_select_ui"),
@@ -87,7 +87,7 @@ ui <- fluidPage(
                  hr(),
                  uiOutput("epitope_select_ui"),
                  hr(),
-                tabsetPanel(
+                 tabsetPanel(
                    tabPanel(
                      "Fixed Radius Neighbourhoods",
                      hr(),
@@ -101,12 +101,12 @@ ui <- fluidPage(
                      DT::dataTableOutput("fixedradius_output"),
                      hr()
                    ),
-                  tabPanel(
+                   tabPanel(
                      "Hierarchical Neighbourhoods",
                      hr(),
                      actionButton("run_Hierarch",HTML(
-                                    "<span class='glyphicon glyphicon-play-circle'></span> Run Hierarchical"
-                                  )),
+                       "<span class='glyphicon glyphicon-play-circle'></span> Run Hierarchical"
+                     )),
                      hr(),
                      tabsetPanel(
                        id="hierarch_tabs",
@@ -120,8 +120,8 @@ ui <- fluidPage(
                        )
                      )
                    )
-                  )
-                 ),
+                 )
+        ),
         tabPanel(
           "Trees",
           hr(),
@@ -131,7 +131,7 @@ ui <- fluidPage(
           uiOutput("tree_output_plot"),
           hr(),
         ),
-        tabPanel("CDR3 Motifs",
+        tabPanel("Export Results",
                  hr(),
                  p("")
         ),
@@ -147,7 +147,7 @@ ui <- fluidPage(
                  #   Flexible distance-based T-cell receptor analysis in Python with tcrdist3. bioRxiv.")
         )
       ),
-        htmlOutput("errorreport") #useShinyFeedback()
+      htmlOutput("errorreport") #useShinyFeedback()
     )
   )
 )

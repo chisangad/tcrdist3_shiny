@@ -20,41 +20,24 @@ render_error_ui <- function(message,output) {
   #showNotification(message)
 }
 
-# Required column names
-REQUIRED_COLS <- c(
-  "v_a_gene", "j_a_gene", "cdr3_a_aa", 
-  "v_b_gene", "j_b_gene", "cdr3_b_aa"
-)
-
 # --- Server Logic ---
 server <- function(input, output, session) {
+  conda_path <- Sys.which("python")
+  render_error_ui("",output = output)
+  render_error_ui(conda_path,output = output)
   
   output$csvtest <- reactive({
     !is.null(input$file1)
   })
+  
   outputOptions(output, "csvtest", suspendWhenHidden = FALSE)
   # Reactive value to store the TCR data
   tcr_data <- reactive({
     render_error_ui("",output = output) #Clear any error messages
     req(input$file1)
-    message("Reading file")
     # Determine separator based on file extension
     sep <- ifelse(tools::file_ext(input$file1$name) == "tsv", "\t", ",")
-    df<-read.csv(input$file1$datapath, sep = sep)
-    message(all(REQUIRED_COLS %in% colnames(df)))
-    # Validation checks
-    if(!all(REQUIRED_COLS %in% colnames(df)))
-    {
-      show_toast(title = "Error!",
-                 text = paste0("Required columns not found in the file. Should include: ",paste0(REQUIRED_COLS,collapse = ", ")),
-                 position = "center",
-                 timer = NULL,
-                 type = "error")
-      return()
-    }
-    # If all checks pass, return the data frame
-    return(df)
-    
+    read.csv(input$file1$datapath, sep = sep)
   })
   
   
@@ -93,13 +76,12 @@ server <- function(input, output, session) {
         message(input$dbfile)
         # Initialize TCRrep object and compute distances
         tr <- TCRrep(cell_df = cell_df,organism = r_to_py(input$organism),chains = r_to_py(chains),db_file = r_to_py(input$dbfile))
-       #message(paste0(names(tr),collapse = "\n"))
+        #message(paste0(names(tr),collapse = "\n"))
         incProgress(0.8, detail = "Finalizing...")
         #Get chains from the distance compute
         all.tr_names<-names(tr)
-        print(all.tr_names)
         chains_tr<-all.tr_names[grepl("^pw_",all.tr_names)]
-        #chains_tr<-gsub("pw_","",chains_tr)#[!grepl("cdr|pmhc",chains_tr)])
+        chains_tr<-gsub("pw_","",chains_tr[!grepl("cdr|pmhc",chains_tr)])
         
         #Include a select option for the chains
         output$matrixoptions <- renderUI({
@@ -107,7 +89,7 @@ server <- function(input, output, session) {
             hr(),
             selectInput(
               "matrix_select",
-              "Select distance matrix:",
+              "Select a chain:",
               selected = chains_tr[1],
               choices = chains_tr
             ),
@@ -121,30 +103,27 @@ server <- function(input, output, session) {
         output$col_select_ui <- renderUI({
           tagList(
             selectizeInput("epitope_sel", "Select Epitope:",
-                             choices = epitopes),
+                           choices = epitopes),
             selectizeInput("columns_sel", "Select Columns:",
-                             choices = genes,
-                              multiple=T)
+                           choices = genes,
+                           multiple=T)
           )
         })
-        
         #Load epitopes in Neighbourhood
         output$epitope_select_ui<-renderUI({
           tagList(
-          selectizeInput("epitope_sel_n", "Select Epitope:",
-                         choices = epitopes)
+            selectizeInput("epitope_sel_n", "Select Epitope:",
+                           choices = epitopes)
           )
         })
         
         return(tr)
       }, error=function(e)
       {
-        if(!is.null(e$message))
-        {
-          message.error<-paste0("An error occurred: ", e$message)
-          render_error_ui(message.error,output)
-          message(message.error)
-        }
+        message(conda_path)
+        message.error<-paste0("An error occurred: ", e$message," with this python:",conda_path)
+        render_error_ui(message.error,output)
+        message(message.error)
       })})
   })
   
@@ -155,18 +134,15 @@ server <- function(input, output, session) {
       results <- analysis_results()
       req(results)
       render_error_ui("",output)
-      chain2check<-input$matrix_select #paste0("cdr3_",substring(input$matrix_select,1,1),"_aa")
+      chain2check<-paste0("cdr3_",substring(input$matrix_select,1,1),"_aa")
       if(is.null(input$matrix_select))
-        chain2check<-
+        chain2check<-paste0("cdr3_",substring(input$chains,1,1),"_aa")
       message(chain2check)
-      pw_matrix = results[[chain2check]]
+      pw_matrix = results[[paste0("pw_",chain2check)]]
       clone_df = results$clone_df
       mat <- pw_matrix
-      chain.col_name<-gsub("^pw_","",chain2check)
-      if(chain2check %in% c("pw_alpha","pw_beta","pw_gamma"))
-        chain.col_name<-paste0("cdr3_",substring(gsub("pw_","",chain2check),1,1),"_aa")
-      rownames(mat) <- clone_df[[chain.col_name]]
-      colnames(mat) <- clone_df[[chain.col_name]]
+      rownames(mat) <- clone_df[[chain2check]]
+      colnames(mat) <- clone_df[[chain2check]]
       
       output$clone_matrix <- DT::renderDataTable({
         DT::datatable(clone_df, 
@@ -175,11 +151,11 @@ server <- function(input, output, session) {
                       options = list(
                         scrollX = TRUE, 
                         pageLength = 10,
-                       dom = 'flrtip',
-                       buttons =list(
-                         list(extend = 'csv', text = 'Download CSV'),
-                         list(extend = 'excel', text = 'Download Excel')
-                       )))
+                        dom = 'flrtip',
+                        buttons =list(
+                          list(extend = 'csv', text = 'Download CSV'),
+                          list(extend = 'excel', text = 'Download Excel')
+                        )))
       }, server = F)
       # Display the distance matrix
       output$dist_matrix <- DT::renderDataTable({
@@ -201,7 +177,7 @@ server <- function(input, output, session) {
         message.error<-paste0("Error rendering heatmap: ", e$message)
         render_error_ui(message.error,output)
       }
-
+      
     })
   })
   #Add sankey gen button to the dashboard
@@ -215,7 +191,7 @@ server <- function(input, output, session) {
                    ))
     )
   })
-
+  
   #Display summary stats  
   observeEvent(input$run,{
     render_error_ui("",output = output) #Clear any error messages
@@ -225,16 +201,16 @@ server <- function(input, output, session) {
       clone_df<-py_to_r(tr$clone_df)
       summary.stats<-do.call(rbind, lapply(unique(clone_df$epitope), function(x)
       {
-         data.frame(epitope=x,
-                    num_individuals=length(unique(subset(clone_df, epitope==x)$subject)),
-                    num_clones=length(unique(subset(clone_df, epitope==x)$clone_id)))
+        data.frame(epitope=x,
+                   num_individuals=length(unique(subset(clone_df, epitope==x)$subject)),
+                   num_clones=length(unique(subset(clone_df, epitope==x)$clone_id)))
       }))
       
       output$summary_matrix <- DT::renderDataTable({
         DT::datatable(summary.stats, options = list(scrollX = TRUE, pageLength = 10))
       })
     }, error=function(e)
-      {
+    {
       if(e$message!="")
       {
         message.error<-paste0("Error loading summary results: ", e$message)
@@ -284,7 +260,7 @@ server <- function(input, output, session) {
       # diff testing is pasted on binary comparison, so all epitope not 'PA' are set to 'X'
       tr$clone_df[,input$epitope_sel_n] = ifelse(tr$clone_df$epitope==input$epitope_sel_n,input$epitope_sel_n,"X")
       pwmat<-r_to_py(tr[[paste0("pw_",chains[1])]])
-
+      
       for(chain in chains[-1])
       {
         message(chain)
@@ -329,80 +305,80 @@ server <- function(input, output, session) {
     req(!hierarch_tabs.check)
     hierarch_tabs.check<<-T
     withProgress(message = 'Running hierarchical neighbourhood clustering...', value = 0, {
-    tryCatch(
-      {
-        tr<-analysis_results()
-        req(tr)
-        req(input$epitope_sel_n)
-        rep_diff <- import("tcrdist.rep_diff")
-        hierdiff <- import("hierdiff")
-        pd <- import("pandas")
-        chains <- strsplit(input$chains, ",")[[1]]
-        message("Run hierarchical neighbourhoods:")
-        # diff testing is pasted on binary comparison, so all epitope not 'PA' are set to 'X'
-        tr$clone_df[,input$epitope_sel_n] = ifelse(tr$clone_df$epitope==input$epitope_sel_n,input$epitope_sel_n,"X")
-        pwmat<-r_to_py(tr[[paste0("pw_",chains[1])]])
-        
-        for(chain in chains[-1])
+      tryCatch(
         {
-          message(chain)
-          pwmat<-pwmat+tr[[paste0("pw_",chain)]]
-        }
-        res_Z<-rep_diff$hcluster_diff(tr$clone_df, tr$pw_beta, x_cols = r_to_py(list(input$epitope_sel_n)), count_col = 'count')
-        res<-res_Z[[1]]
-        Z<-res_Z[[2]]
-
-        res_summary <- rep_diff$member_summ(res_df = res, clone_df = tr$clone_df, addl_cols=r_to_py(list('epitope')))
-        res_detailed = r_to_py(cbind(res, res_summary))
-        incProgress(0.3, detail = "Preparing results...")
-        res_detailed.df<-py_to_r(res_detailed)
-        columns.tooltip<-colnames(res_detailed.df)[(grep("FDRq",colnames(res_detailed.df))+1):ncol(res_detailed.df)]
-        message(paste0(columns.tooltip,";"))     
-        html = hierdiff$plot_hclust_props(Z,title=paste0(input$epitope_sel_n,' Epitope'),res=res_detailed,tooltip_cols=r_to_py(columns.tooltip),alpha=0.00001, colors = r_to_py(c('blue','gray')),alpha_col='pvalue')
-        incProgress(0.9, detail = "Rendering results table...")
-        output$hierachy_output <- DT::renderDataTable({
-          DT::datatable(py_to_r(res_detailed),caption = "Hierarchical neighbours",
-                        extensions = 'Buttons',
-                        options = list(
-                          scrollX = TRUE, 
-                          pageLength = 10,
-                          dom = 'Bflrtip',
-                          buttons =list(
-                            list(extend = 'csv', text = 'Download CSV'),
-                            list(extend = 'excel', text = 'Download Excel')
-                          )))
-        
-        }, server = F)
-        #message(html)
-        incProgress(0.95, detail = "Save html file...")
-        if(!dir.exists("www"))
-          dir.create("www")
-        html.file<-paste0(session$token,"_Test_hierachical.html")
-        write(html,file.path("www/",html.file))
-        output$hierachy_output_plot<-renderUI(
-          tags$iframe(
-            src = html.file,
-            width = "95%",
-            style = "height: 90vh;", # Use CSS for full viewport height
-            frameBorder = "0"
+          tr<-analysis_results()
+          req(tr)
+          req(input$epitope_sel_n)
+          rep_diff <- import("tcrdist.rep_diff")
+          hierdiff <- import("hierdiff")
+          pd <- import("pandas")
+          chains <- strsplit(input$chains, ",")[[1]]
+          message("Run hierarchical neighbourhoods:")
+          # diff testing is pasted on binary comparison, so all epitope not 'PA' are set to 'X'
+          tr$clone_df[,input$epitope_sel_n] = ifelse(tr$clone_df$epitope==input$epitope_sel_n,input$epitope_sel_n,"X")
+          pwmat<-r_to_py(tr[[paste0("pw_",chains[1])]])
+          
+          for(chain in chains[-1])
+          {
+            message(chain)
+            pwmat<-pwmat+tr[[paste0("pw_",chain)]]
+          }
+          res_Z<-rep_diff$hcluster_diff(tr$clone_df, tr$pw_beta, x_cols = r_to_py(list(input$epitope_sel_n)), count_col = 'count')
+          res<-res_Z[[1]]
+          Z<-res_Z[[2]]
+          
+          res_summary <- rep_diff$member_summ(res_df = res, clone_df = tr$clone_df, addl_cols=r_to_py(list('epitope')))
+          res_detailed = r_to_py(cbind(res, res_summary))
+          incProgress(0.3, detail = "Preparing results...")
+          res_detailed.df<-py_to_r(res_detailed)
+          columns.tooltip<-colnames(res_detailed.df)[(grep("FDRq",colnames(res_detailed.df))+1):ncol(res_detailed.df)]
+          message(paste0(columns.tooltip,";"))     
+          html = hierdiff$plot_hclust_props(Z,title=paste0(input$epitope_sel_n,' Epitope'),res=res_detailed,tooltip_cols=r_to_py(columns.tooltip),alpha=0.00001, colors = r_to_py(c('blue','gray')),alpha_col='pvalue')
+          incProgress(0.9, detail = "Rendering results table...")
+          output$hierachy_output <- DT::renderDataTable({
+            DT::datatable(py_to_r(res_detailed),caption = "Hierarchical neighbours",
+                          extensions = 'Buttons',
+                          options = list(
+                            scrollX = TRUE, 
+                            pageLength = 10,
+                            dom = 'Bflrtip',
+                            buttons =list(
+                              list(extend = 'csv', text = 'Download CSV'),
+                              list(extend = 'excel', text = 'Download Excel')
+                            )))
+            
+          }, server = F)
+          #message(html)
+          incProgress(0.95, detail = "Save html file...")
+          if(!dir.exists("www"))
+            dir.create("www")
+          html.file<-paste0(session$token,"_Test_hierachical.html")
+          write(html,file.path("www/",html.file))
+          output$hierachy_output_plot<-renderUI(
+            tags$iframe(
+              src = html.file,
+              width = "100%",
+              style = "height: 100vh;", # Use CSS for full viewport height
+              frameBorder = "0"
+            )
           )
-        )
-        
-      }, error=function(e)
-      {
-        if(e$message!="")
+          
+        }, error=function(e)
         {
-          message.error<-paste0("Error computing hierarchical neighbourhood clusters: ", e$message)
-          output$genepairsplots<-renderUI(NULL)
-          render_error_ui(message = message.error,output)
-          #output$errorreport <- renderText(message.error)
-          message(message.error)
+          if(e$message!="")
+          {
+            message.error<-paste0("Error computing hierarchical neighbourhood clusters: ", e$message)
+            output$genepairsplots<-renderUI(NULL)
+            render_error_ui(message = message.error,output)
+            #output$errorreport <- renderText(message.error)
+            message(message.error)
+          }
         }
-      }
-    )})
+      )})
   })
   
-
+  
   #Populate trees
   observeEvent(input$run_trees,{
     render_error_ui("",output = output) #Clear any error messages
@@ -427,13 +403,13 @@ server <- function(input, output, session) {
           )
         })
       }, error=function(e)
-        {
+      {
         message.error<-paste0("Error computing trees: ", e$message)
         output$genepairsplots<-renderUI(NULL)
         render_error_ui(message = message.error,output)
         #output$errorreport <- renderText(message.error)
         message(message.error)
-    })})
+      })})
   })
   # Download handler for the download button
   output$download_data <- downloadHandler(
@@ -446,7 +422,7 @@ server <- function(input, output, session) {
       write.csv(tr$clone_df, file, row.names = FALSE)
     }
   )
-
+  
   #Clean-up temp files when session ends
   onStop(function() {
     temp.files<-list.files("www",pattern = paste0(session$token,".*"),full.names = T)
@@ -458,6 +434,6 @@ server <- function(input, output, session) {
         message("Temporary file removed: ", temp_file)
       }
     }
-
+    
   })
 }
