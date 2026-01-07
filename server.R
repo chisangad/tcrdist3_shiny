@@ -143,7 +143,6 @@ server <- function(input, output, session) {
       mat <- pw_matrix
       rownames(mat) <- clone_df[[chain2check]]
       colnames(mat) <- clone_df[[chain2check]]
-      
       output$clone_matrix <- DT::renderDataTable({
         DT::datatable(clone_df, 
                       caption = "Summary of TCRdist clone df",
@@ -351,10 +350,10 @@ server <- function(input, output, session) {
           }, server = F)
           #message(html)
           incProgress(0.95, detail = "Save html file...")
-          if(!dir.exists("www"))
-            dir.create("www")
+          temp_path <- tempfile()
           html.file<-paste0(session$token,"_Test_hierachical.html")
-          write(html,file.path("www/",html.file))
+          write(html,temp_path)
+          file.copy(temp_path,file.path("www/",html.file))
           output$hierachy_output_plot<-renderUI(
             tags$iframe(
               src = html.file,
@@ -389,8 +388,8 @@ server <- function(input, output, session) {
         incProgress(0.1, detail = "Importing libraries...")
         TCRtree<-import("tcrdist.tree")
         incProgress(0.3, detail = "Preparing data...")
-        file.name<-paste0(session$token,"dash.mouse.b.tree.html")
-        tcrtree = TCRtree$TCRtree(tcrrep = tr, html_name = paste0("www/",file.name))
+        file.name<-file.path(tempdir(),paste0(session$token,"dash.mouse.b.tree.html"))
+        tcrtree = TCRtree$TCRtree(tcrrep = tr, html_name = file.name)
         incProgress(0.5, detail = "Building tree...")
         tcrtree$build_tree()
         incProgress(0.9, detail = "Finalizing...")
