@@ -20,6 +20,19 @@ render_error_ui <- function(message,output) {
   #showNotification(message)
 }
 
+remove_www_tempfiles<- function(session,pattern="*")
+{
+  temp.files<-list.files("www",pattern = paste0(session$token,".",pattern),full.names = T)
+  message(paste0(temp.files,collapse = ";"))
+  for(temp_file in temp.files)
+  {
+    if (file.exists(temp_file)) {
+      file.remove(temp_file)
+      message("Temporary file removed: ", temp_file)
+    }
+  }
+}
+
 # --- Server Logic ---
 server <- function(input, output, session) {
   conda_path <- Sys.which("python")
@@ -253,7 +266,7 @@ server <- function(input, output, session) {
       req(tr)
       req(input$epitope_sel_n)
       rep_diff <- import("tcrdist.rep_diff")
-      message("Run fixed neighbourhoods:")
+      message("Run fixed neighbourhoods with ",input$epitope_sel_n,":")
       np<-import("numpy")
       chains <- strsplit(input$chains, ",")[[1]]
       # diff testing is pasted on binary comparison, so all epitope not 'PA' are set to 'X'
@@ -299,7 +312,7 @@ server <- function(input, output, session) {
   })
   
   #Listen to hierarchical neighbourhood clustering events
-  observeEvent(c(input$hierarch_tabs, input$epitope_sel_n, input$run_Hierarch), {
+  observeEvent(c(input$hierarch_tabs, input$epitope_sel_n, input$run_Hierarch,input$run_fixn), {
     render_error_ui("",output = output) #Clear any error messages
     req(!hierarch_tabs.check)
     hierarch_tabs.check<<-T
@@ -351,6 +364,7 @@ server <- function(input, output, session) {
           #message(html)
           incProgress(0.95, detail = "Save html file...")
           temp_path <- tempfile()
+          remove_www_tempfiles(session,"hierachical.html")
           html.file<-paste0(session$token,"_hierachical.html")
           write(html,temp_path)
           file.copy(temp_path,file.path("www/",html.file))
@@ -377,7 +391,6 @@ server <- function(input, output, session) {
       )})
   })
   
-  
   #Populate trees
   observeEvent(input$run_trees,{
     render_error_ui("",output = output) #Clear any error messages
@@ -385,21 +398,23 @@ server <- function(input, output, session) {
       tryCatch({
         tr<-analysis_results()
         req(tr)
-        incProgress(0.1, detail = "Importing libraries...")
+        incProgress(0.1, detail = "Importing required library...")
         TCRtree<-import("tcrdist.tree")
         incProgress(0.3, detail = "Preparing data...")
-        file.name<-paste0(session$token,"dash.mouse.b.tree.html")
+        file.name<-paste0(session$token,"_tree.html")
         temp.file<-tempfile()
+        message("Temp file for trees: ",temp.file)
+        remove_www_tempfiles(session,"tree.html")
         tcrtree = TCRtree$TCRtree(tcrrep = tr, html_name = temp.file)
-        file.copy(temp.file,paste0("www/",file.name))
         incProgress(0.5, detail = "Building tree...")
         tcrtree$build_tree()
         incProgress(0.9, detail = "Finalizing...")
+        file.copy(temp.file,paste0("www/",file.name))
         output$tree_output_plot<-renderUI({
           tags$iframe(
             src = file.name,
             width = "95%",
-            style = "height: 90vh;", # Use CSS for full viewport height
+            style = "height: 90vh;", # Use CSS for full view port height
             frameBorder = "0"
           )
         })
@@ -412,6 +427,7 @@ server <- function(input, output, session) {
         message(message.error)
       })})
   })
+  
   # Download handler for the download button
   output$download_data <- downloadHandler(
     filename = function() {
@@ -426,15 +442,6 @@ server <- function(input, output, session) {
   
   #Clean-up temp files when session ends
   onStop(function() {
-    temp.files<-list.files("www",pattern = paste0(session$token,".*"),full.names = T)
-    message(paste0(temp.files,collapse = ";"))
-    for(temp_file in temp.files)
-    {
-      if (file.exists(temp_file)) {
-        file.remove(temp_file)
-        message("Temporary file removed: ", temp_file)
-      }
-    }
-    
+    remove_www_tempfiles(session)
   })
 }
