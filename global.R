@@ -49,7 +49,13 @@ if(!require(shinyFeedback))
   install.packages("shinyFeedback")
   library(shinyFeedback)
 }
-  
+if(!require(shinyWidgets))
+{
+  install.packages("shinyWidgets")
+  library(shinyWidgets)
+}
+
+
 # py_run_string("
 # def process_list(my_list):
 #         return my_list

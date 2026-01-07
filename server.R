@@ -20,6 +20,12 @@ render_error_ui <- function(message,output) {
   #showNotification(message)
 }
 
+# Required column names
+REQUIRED_COLS <- c(
+  "v_a_gene", "j_a_gene", "cdr3_a_aa", 
+  "v_b_gene", "j_b_gene", "cdr3_b_aa"
+)
+
 # --- Server Logic ---
 server <- function(input, output, session) {
   
@@ -31,9 +37,24 @@ server <- function(input, output, session) {
   tcr_data <- reactive({
     render_error_ui("",output = output) #Clear any error messages
     req(input$file1)
+    message("Reading file")
     # Determine separator based on file extension
     sep <- ifelse(tools::file_ext(input$file1$name) == "tsv", "\t", ",")
-    read.csv(input$file1$datapath, sep = sep)
+    df<-read.csv(input$file1$datapath, sep = sep)
+    message(all(REQUIRED_COLS %in% colnames(df)))
+    # Validation checks
+    if(!all(REQUIRED_COLS %in% colnames(df)))
+    {
+      show_toast(title = "Error!",
+                 text = paste0("Required columns not found in the file. Should include: ",paste0(REQUIRED_COLS,collapse = ", ")),
+                 position = "center",
+                 timer = NULL,
+                 type = "error")
+      return()
+    }
+    # If all checks pass, return the data frame
+    return(df)
+    
   })
   
   
@@ -76,8 +97,9 @@ server <- function(input, output, session) {
         incProgress(0.8, detail = "Finalizing...")
         #Get chains from the distance compute
         all.tr_names<-names(tr)
+        print(all.tr_names)
         chains_tr<-all.tr_names[grepl("^pw_",all.tr_names)]
-        chains_tr<-gsub("pw_","",chains_tr[!grepl("cdr|pmhc",chains_tr)])
+        #chains_tr<-gsub("pw_","",chains_tr)#[!grepl("cdr|pmhc",chains_tr)])
         
         #Include a select option for the chains
         output$matrixoptions <- renderUI({
@@ -85,7 +107,7 @@ server <- function(input, output, session) {
             hr(),
             selectInput(
               "matrix_select",
-              "Select a chain:",
+              "Select distance matrix:",
               selected = chains_tr[1],
               choices = chains_tr
             ),
@@ -105,6 +127,7 @@ server <- function(input, output, session) {
                               multiple=T)
           )
         })
+        
         #Load epitopes in Neighbourhood
         output$epitope_select_ui<-renderUI({
           tagList(
@@ -132,15 +155,18 @@ server <- function(input, output, session) {
       results <- analysis_results()
       req(results)
       render_error_ui("",output)
-      chain2check<-paste0("cdr3_",substring(input$matrix_select,1,1),"_aa")
+      chain2check<-input$matrix_select #paste0("cdr3_",substring(input$matrix_select,1,1),"_aa")
       if(is.null(input$matrix_select))
-        chain2check<-paste0("cdr3_",substring(input$chains,1,1),"_aa")
+        chain2check<-
       message(chain2check)
-      pw_matrix = results[[paste0("pw_",chain2check)]]
+      pw_matrix = results[[chain2check]]
       clone_df = results$clone_df
       mat <- pw_matrix
-      rownames(mat) <- clone_df[[chain2check]]
-      colnames(mat) <- clone_df[[chain2check]]
+      chain.col_name<-gsub("^pw_","",chain2check)
+      if(chain2check %in% c("pw_alpha","pw_beta","pw_gamma"))
+        chain.col_name<-paste0("cdr3_",substring(gsub("pw_","",chain2check),1,1),"_aa")
+      rownames(mat) <- clone_df[[chain.col_name]]
+      colnames(mat) <- clone_df[[chain.col_name]]
       
       output$clone_matrix <- DT::renderDataTable({
         DT::datatable(clone_df, 
@@ -349,15 +375,15 @@ server <- function(input, output, session) {
         }, server = F)
         #message(html)
         incProgress(0.95, detail = "Save html file...")
-        if(!dir.exists("wwww"))
-          dir.create("wwww")
+        if(!dir.exists("www"))
+          dir.create("www")
         html.file<-paste0(session$token,"_Test_hierachical.html")
         write(html,file.path("www/",html.file))
         output$hierachy_output_plot<-renderUI(
           tags$iframe(
             src = html.file,
-            width = "100%",
-            style = "height: 100vh;", # Use CSS for full viewport height
+            width = "95%",
+            style = "height: 90vh;", # Use CSS for full viewport height
             frameBorder = "0"
           )
         )

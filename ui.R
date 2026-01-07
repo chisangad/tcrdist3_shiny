@@ -131,7 +131,7 @@ ui <- fluidPage(
           uiOutput("tree_output_plot"),
           hr(),
         ),
-        tabPanel("Export Results",
+        tabPanel("CDR3 Motifs",
                  hr(),
                  p("")
         ),
