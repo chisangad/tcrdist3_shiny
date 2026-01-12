@@ -50,6 +50,35 @@ if(!require(shinyFeedback))
   library(shinyFeedback)
 }
 
+if(!require(tidyverse))
+{
+  install.packages("tidyverse")
+  library(tidyverse)
+}
+
+if(!require(visNetwork))
+{
+  install.packages("visNetwork")
+  library(visNetwork)
+}
+
+
+if(!require("bslib"))
+{
+  install.packages("bslib")
+  library(bslib)
+}
+if(!require("shinycssloaders"))
+{
+  install.packages("shinycssloaders")
+  library(shinycssloaders)
+}
+if(!require(shinyalert))
+{
+  install.packages("shinyalert")
+  library(shinyalert)
+}
+
 # py_run_string("
 # def process_list(my_list):
 #         return my_list
