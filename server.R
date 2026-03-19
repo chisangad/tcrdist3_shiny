@@ -46,7 +46,7 @@ remove_www_tempfiles <- function(session, pattern = "*")
 
 # --- Server Logic ---
 server <- function(input, output, session) {
-  neighbour_results<-NULL
+  neighbour_results <- NULL
   conda_path <- Sys.which("python")
   render_error_ui("", output = output)
   render_error_ui(conda_path, output = output)
@@ -70,13 +70,12 @@ server <- function(input, output, session) {
   analysis_results <- eventReactive(input$run, {
     render_error_ui("", output = output) #Clear any error messages
     req(tcr_data())
-    if(!("epitope" %in% colnames(tcr_data())) || !("subject" %in% colnames(tcr_data())))
+    if (!("epitope" %in% colnames(tcr_data())) ||
+        !("subject" %in% colnames(tcr_data())))
     {
-      shinyalert(
-        title = "Missing columns",
-        text = "Column names: 'epitope' or 'subject' missing in input data",
-        type = "error"
-      )
+      shinyalert(title = "Missing columns",
+                 text = "Column names: 'epitope' or 'subject' missing in input data",
+                 type = "error")
     }
     
     hierarch_tabs.check <<- F
@@ -168,15 +167,25 @@ server <- function(input, output, session) {
             )
           )
         })
-          output$chain_select_ui_knn <- renderUI({
-            tagList(
-              selectInput(
-                "chain_select_knn",
-                "Select a chain:",
-                selected = chains_tr_only[1],
-                choices = chains_tr_only
-              )
+        output$chain_select_ui_trees<-renderUI({
+          tagList(
+            selectInput(
+              "chain_select_tree",
+              "Select a chain:",
+              selected = chains_tr_only[1],
+              choices = chains_tr_only
             )
+        )})
+          
+        output$chain_select_ui_knn <- renderUI({
+          tagList(
+            selectInput(
+              "chain_select_knn",
+              "Select a chain:",
+              selected = chains_tr_only[1],
+              choices = chains_tr_only
+            )
+          )
         })
         
         return(tr)
@@ -200,9 +209,9 @@ server <- function(input, output, session) {
       results <- analysis_results()
       req(results)
       render_error_ui("", output)
-      chain2check <- gsub("pw_","", (input$matrix_select))
-      if (sum(chain2check %in% colnames(results$clone_df))==0)
-        chain2check <- paste0("cdr3_", substring(chain2check,1, 1), "_aa")
+      chain2check <- gsub("pw_", "", (input$matrix_select))
+      if (sum(chain2check %in% colnames(results$clone_df)) == 0)
+        chain2check <- paste0("cdr3_", substring(chain2check, 1, 1), "_aa")
       message(chain2check)
       #pw_matrix = results[[paste0("pw_", chain2check)]]
       pw_matrix <- results[[input$matrix_select]]
@@ -221,15 +230,23 @@ server <- function(input, output, session) {
             pageLength = 10,
             dom = 'flrtip',
             buttons = list(
-              list(extend = 'csv', text = 'Download CSV',filename=paste0("TCRDist3-clone-",session$token)),
-              list(extend = 'excel', text = 'Download Excel',filename=paste0("TCRDist3-clone-",session$token))
+              list(
+                extend = 'csv',
+                text = 'Download CSV',
+                filename = paste0("TCRDist3-clone-", session$token)
+              ),
+              list(
+                extend = 'excel',
+                text = 'Download Excel',
+                filename = paste0("TCRDist3-clone-", session$token)
+              )
             )
           )
         )
-      },server = F)
+      }, server = F)
       
       # Display the distance matrix
-      session.id<-session$token
+      session.id <- session$token
       output$dist_matrix <- DT::renderDataTable({
         DT::datatable(
           mat,
@@ -238,14 +255,54 @@ server <- function(input, output, session) {
             scrollX = TRUE,
             pageLength = 10,
             rownames = F,
-            dom = 'lfrtipB', #'flrtBip',
-            buttons  = list('copy', list(extend='csv',text="csv",filename=paste0('TCR-distance-matrix-',input$matrix_select,"-",session.id)), 
-                         list(extend="excel",text='excel',filename=paste0('TCR-distance-matrix-',input$matrix_select,"-",session.id)), 
-                         list(extend='pdf',text='pdf',filename=paste0('TCR-distance-matrix-',input$matrix_select,"-",session.id)), 
-                         list(extend='print',text="print",filename=paste0('TCR-distance-matrix-',input$matrix_select,"-",session.id)))
+            dom = 'lfrtipB',
+            #'flrtBip',
+            buttons  = list(
+              'copy',
+              list(
+                extend = 'csv',
+                text = "csv",
+                filename = paste0(
+                  'TCR-distance-matrix-',
+                  input$matrix_select,
+                  "-",
+                  session.id
+                )
+              ),
+              list(
+                extend = "excel",
+                text = 'excel',
+                filename = paste0(
+                  'TCR-distance-matrix-',
+                  input$matrix_select,
+                  "-",
+                  session.id
+                )
+              ),
+              list(
+                extend = 'pdf',
+                text = 'pdf',
+                filename = paste0(
+                  'TCR-distance-matrix-',
+                  input$matrix_select,
+                  "-",
+                  session.id
+                )
+              ),
+              list(
+                extend = 'print',
+                text = "print",
+                filename = paste0(
+                  'TCR-distance-matrix-',
+                  input$matrix_select,
+                  "-",
+                  session.id
+                )
+              )
+            )
           )
         )
-      },server = F)
+      }, server = F)
       
       # Display the heatmap
       output$heatmap <- renderPlot({
@@ -346,84 +403,116 @@ server <- function(input, output, session) {
   
   
   #Run Fixed Radius Neighbourhoods
-  observeEvent(c(input$run_fixn,input$hierarch_tabs), {
+  observeEvent(c(input$run_fixn, input$hierarch_tabs), {
     render_error_ui("", output = output) #Clear any error messages
-    tryCatch({
-      withProgress(message = paste0("Run fixed neighbourhoods with ", input$epitope_sel_n, ":"), value = 0, {
-      tr <- analysis_results()
-      req(tr)
-      req(input$epitope_sel_n)
-      rep_diff <- import("tcrdist.rep_diff")
-      incProgress(0.1,"Preparing data...")
-      np <- import("numpy")
-      chain <- input$chain_select_knn
-      # diff testing is pasted on binary comparison, so all epitope not 'PA' are set to 'X'
-      tr$clone_df[, input$epitope_sel_n] = ifelse(tr$clone_df$epitope ==
-                                                    input$epitope_sel_n,
-                                                  input$epitope_sel_n,
-                                                  "X")
-      pwmat <- r_to_py(tr[[paste0("pw_", chain)]])
-      
-      incProgress(0.5,"Running neighbourhood differential...")
-      # Larger Radius
-      nn_df = rep_diff$neighborhood_diff(
-        clone_df = tr$clone_df,
-        pwmat = pwmat,
-        count_col = 'count',
-        x_cols = r_to_py(list(input$epitope_sel_n)),
-        knn_radius = r_to_py(input$knn_radius)
+    #tryCatch({
+      withProgress(
+        message = paste0("Run fixed neighbourhoods with ", input$epitope_sel_n, ":"),
+        value = 0,
+        {
+          tr <- analysis_results()
+          req(tr)
+          req(input$epitope_sel_n)
+          message("Import tcrdist.rep_diff")
+          rep_diff <- import("tcrdist.rep_diff")
+          incProgress(0.1, "Preparing data...")
+          np <- import("numpy")
+          chain <- input$chain_select_knn
+          message("Computing for chain", chain)
+          # diff testing is pasted on binary comparison, so all epitope not 'PA' are set to 'X'
+          tr$clone_df[, input$epitope_sel_n] = ifelse(tr$clone_df$epitope ==
+                                                        input$epitope_sel_n,
+                                                      input$epitope_sel_n,
+                                                      "X")
+          
+          pwmat <- r_to_py(tr[[paste0("pw_", chain)]])
+          incProgress(0.5, "Running neighbourhood differential...")
+          # Larger Radius
+          nn_df = rep_diff$neighborhood_diff(
+            clone_df = tr$clone_df,
+            pwmat = pwmat,
+            count_col = 'count',
+            x_cols = r_to_py(list(input$epitope_sel_n)),
+            knn_radius = r_to_py(input$knn_radius)
+          )
+          nn_df1 <- nn_df %>% select(
+            c(
+              'K_neighbors',
+              'val_0',
+              'ct_0',
+              'val_2',
+              'ct_2',
+              'RR',
+              'OR',
+              'pvalue',
+              'FWERp',
+              'FDRq'
+            )
+          ) %>% arrange('FDRq') %>% arrange(desc(OR), desc(ct_0))
+          output$fixedradius_output_ui <- renderUI({
+            withSpinner(DT::dataTableOutput("fixedradius_output"))
+          })
+          incProgress(0.9, "Displaying results table...")
+          
+          session.id <- session$token
+          file.name = paste0(
+            'TCRdist3-KNN-clustering-',
+            input$epitope_sel_n,
+            "-",
+            chain,
+            "-",
+            session.id
+          )
+          output$fixedradius_output <- DT::renderDT({
+            DT::datatable(
+              nn_df1,
+              caption = "KNN neighbours",
+              rownames = F,
+              extensions = 'Buttons',
+              options = list(
+                scrollX = TRUE,
+                pageLength = 10,
+                dom = 'lfrtipB',
+                buttons  = list(
+                  'copy',
+                  list(
+                    extend = 'csv',
+                    text = "csv",
+                    filename = file.name
+                  ),
+                  list(
+                    extend = "excel",
+                    text = 'excel',
+                    filename = file.name
+                  ),
+                  list(
+                    extend = 'pdf',
+                    text = 'pdf',
+                    filename = file.name
+                  ),
+                  list(
+                    extend = 'print',
+                    text = "print",
+                    filename = file.name
+                  )
+                )
+              )
+            )
+          }, server = F)
+        }
       )
-      nn_df1 <- nn_df %>% select(
-        c(
-          'K_neighbors',
-          'val_0',
-          'ct_0',
-          'val_2',
-          'ct_2',
-          'RR',
-          'OR',
-          'pvalue',
-          'FWERp',
-          'FDRq'
-        )
-      ) %>% arrange('FDRq') %>% arrange(desc(OR), desc(ct_0))
-      output$fixedradius_output_ui <-renderUI({
-        withSpinner(DT::dataTableOutput("fixedradius_output"))
-      })
-      incProgress(0.9,"Displaying results table...")
-      
-      session.id<-session$token
-      file.name=paste0('TCRdist3-KNN-clustering-',input$epitope_sel_n,"-",chain,"-",session.id)
-      output$fixedradius_output<-DT::renderDT({
-        DT::datatable(
-          nn_df1,
-          caption = "KNN neighbours",
-          rownames = F,
-          extensions = 'Buttons',
-          options = list(
-            scrollX = TRUE,
-            pageLength = 10,
-            dom = 'lfrtipB',
-            buttons  = list('copy', list(extend='csv',text="csv",filename= file.name),
-                            list(extend="excel",text='excel',filename=file.name), 
-                            list(extend='pdf',text='pdf',filename=file.name), 
-                            list(extend='print',text="print",filename=file.name))
-          )
-          )
-      }, server = F)
-      })
-    }, error = function(e)
-    {
-      if (e$message != "")
-      {
-        message.error <- paste0("Error computing fixed radius neighbourhoods: ",
-                                e$message)
-        output$genepairsplots <- renderUI(NULL)
-        render_error_ui(message = message.error, output)
-        #output$errorreport <- renderText(message.error)
-        message(message.error)
-      }
-    })
+    # }, error = function(e)
+    # {
+    #   if (e$message != "")
+    #   {
+    #     message.error <- paste0("Error computing fixed radius neighbourhoods: ",
+    #                             e$message)
+    #     output$genepairsplots <- renderUI(NULL)
+    #     render_error_ui(message = message.error, output)
+    #     #output$errorreport <- renderText(message.error)
+    #     message(message.error)
+    #   }
+    # })
   })
   
   
@@ -434,116 +523,136 @@ server <- function(input, output, session) {
   
   #Listen to hierarchical neighbourhood clustering events
   #neighbour_results <- eventReactive(
-  observeEvent(
-      input$run_Hierarch,
-    {
-      render_error_ui("", output = output) #Clear any error messages
-      message("Running neighbouring")
-      req(!hierarch_tabs.check)
-      hierarch_tabs.check <<- T
-      withProgress(message = 'Running hierarchical neighbourhood clustering...', value = 0, {
-        tryCatch({
-          tr <- analysis_results()
-          req(tr)
-          req(input$epitope_sel_h)
-          epitope_h<-input$epitope_sel_h
-          rep_diff <- import("tcrdist.rep_diff")
-          hierdiff <- import("hierdiff")
-          pd <- import("pandas")
-          chains <- strsplit(input$chains, ",")[[1]]
-          incProgress(0.1,"Run hierarchical neighbourhoods")
-          # diff testing is pasted on binary comparison, so all epitope not 'PA' are set to 'X'
-          tr$clone_df[, epitope_h] = ifelse(tr$clone_df$epitope ==
-                                                        epitope_h,
-                                                      epitope_h,
-                                                      "X")
-          pwmat <- r_to_py(tr[[paste0("pw_", chains[1])]])
-          chain <- input$chain_select_neighbours
-          #tr$pw_beta
-          pwmat <- tr[[paste0("pw_", chain)]]
-          res_Z <- rep_diff$hcluster_diff(tr$clone_df,
-                                          pwmat,
-                                          x_cols = r_to_py(list(epitope_h)),
-                                          count_col = 'count')
-          res <- res_Z[[1]]
-          Z <- res_Z[[2]]
-          
-          res_summary <- rep_diff$member_summ(
-            res_df = res,
-            clone_df = tr$clone_df,
-            addl_cols = r_to_py(list('epitope'))
-          )
-          res_detailed = r_to_py(cbind(res, res_summary))
-          incProgress(0.3, detail = "Preparing results...")
-          res_detailed.df <- py_to_r(res_detailed)
-          columns.tooltip <- colnames(res_detailed.df)[(grep("FDRq", colnames(res_detailed.df)) +
-                                                          1):ncol(res_detailed.df)]
-          message(paste0(columns.tooltip, ";"))
-          incProgress(0.5,"Generating cluster diagram...")
-          html = hierdiff$plot_hclust_props(
-            Z,
-            title = paste0(epitope_h, ' Epitope & ', chain, "-chain"),
-            res = res_detailed,
-            tooltip_cols = r_to_py(columns.tooltip),
-            alpha = 0.00001,
-            colors = r_to_py(c('blue', 'gray')),
-            alpha_col = 'pvalue'
-          )
-          incProgress(0.9, detail = "Rendering results table...")
-          session.id<-session$token
-          file.name=paste0('TCRdist3-hierarchical-clustering-',epitope_h,"-",chain,"-",session.id)
-          output$hierachy_output <- DT::renderDataTable({
-            DT::datatable(
-              py_to_r(res_detailed),
-              caption = "Hierarchical neighbours",
-              extensions = 'Buttons',
-              rownames = F,
-              options = list(
-                scrollX = TRUE,
-                pageLength = 10,
-                dom = 'lfrtipB', #'flrtBip',
-                buttons  = list('copy', list(extend='csv',text="csv",filename= file.name),
-                                list(extend="excel",text='excel',filename=file.name), 
-                                list(extend='pdf',text='pdf',filename=file.name), 
-                                list(extend='print',text="print",filename=file.name))
+  observeEvent(input$run_Hierarch, {
+    render_error_ui("", output = output) #Clear any error messages
+    message("Running neighbouring")
+    req(!hierarch_tabs.check)
+    hierarch_tabs.check <<- T
+    withProgress(message = 'Running hierarchical neighbourhood clustering...', value = 0, {
+      tryCatch({
+        tr <- analysis_results()
+        req(tr)
+        req(input$epitope_sel_h)
+        epitope_h <- input$epitope_sel_h
+        rep_diff <- import("tcrdist.rep_diff")
+        hierdiff <- import("hierdiff")
+        pd <- import("pandas")
+        chains <- strsplit(input$chains, ",")[[1]]
+        incProgress(0.1, "Run hierarchical neighbourhoods")
+        # diff testing is pasted on binary comparison, so all epitope not 'PA' are set to 'X'
+        tr$clone_df[, epitope_h] = ifelse(tr$clone_df$epitope ==
+                                            epitope_h, epitope_h, "X")
+        pwmat <- r_to_py(tr[[paste0("pw_", chains[1])]])
+        chain <- input$chain_select_neighbours
+        #tr$pw_beta
+        pwmat <- tr[[paste0("pw_", chain)]]
+        res_Z <- rep_diff$hcluster_diff(tr$clone_df,
+                                        pwmat,
+                                        x_cols = r_to_py(list(epitope_h)),
+                                        count_col = 'count')
+        res <- res_Z[[1]]
+        Z <- res_Z[[2]]
+        
+        res_summary <- rep_diff$member_summ(
+          res_df = res,
+          clone_df = tr$clone_df,
+          addl_cols = r_to_py(list('epitope'))
+        )
+        res_detailed = r_to_py(cbind(res, res_summary))
+        incProgress(0.3, detail = "Preparing results...")
+        res_detailed.df <- py_to_r(res_detailed)
+        columns.tooltip <- colnames(res_detailed.df)[(grep("FDRq", colnames(res_detailed.df)) +
+                                                        1):ncol(res_detailed.df)]
+        message(paste0(columns.tooltip, ";"))
+        incProgress(0.5, "Generating cluster diagram...")
+        html = hierdiff$plot_hclust_props(
+          Z,
+          title = paste0(epitope_h, ' Epitope & ', chain, "-chain"),
+          res = res_detailed,
+          tooltip_cols = r_to_py(columns.tooltip),
+          alpha = 0.00001,
+          colors = r_to_py(c('blue', 'gray')),
+          alpha_col = 'pvalue'
+        )
+        incProgress(0.9, detail = "Rendering results table...")
+        session.id <- session$token
+        file.name = paste0('TCRdist3-hierarchical-clustering-',
+                           epitope_h,
+                           "-",
+                           chain,
+                           "-",
+                           session.id)
+        output$hierachy_output <- DT::renderDataTable({
+          DT::datatable(
+            py_to_r(res_detailed),
+            caption = "Hierarchical neighbours",
+            extensions = 'Buttons',
+            rownames = F,
+            options = list(
+              scrollX = TRUE,
+              pageLength = 10,
+              dom = 'lfrtipB',
+              #'flrtBip',
+              buttons  = list(
+                'copy',
+                list(
+                  extend = 'csv',
+                  text = "csv",
+                  filename = file.name
+                ),
+                list(
+                  extend = "excel",
+                  text = 'excel',
+                  filename = file.name
+                ),
+                list(
+                  extend = 'pdf',
+                  text = 'pdf',
+                  filename = file.name
+                ),
+                list(
+                  extend = 'print',
+                  text = "print",
+                  filename = file.name
+                )
               )
             )
-            
-          }, server = F)
-          
-          #message(html)
-          incProgress(0.95, detail = "Save html file...")
-          temp_path <- tempfile()
-          remove_www_tempfiles(session, "hierachical.html")
-          html.file <- paste0(session$token, "_hierachical.html")
-          write(html, temp_path)
-          file.copy(temp_path, file.path("www/", html.file))
-          
-          output$hierachy_output_plot <- renderUI(
-            tags$iframe(
-              src = html.file,
-              width = "100%",
-              style = "height: 100vh;",
-              # Use CSS for full viewport height
-              frameBorder = "0"
-            )
           )
-          neighbour_results<<-res_detailed.df
-        }, error = function(e)
+          
+        }, server = F)
+        
+        #message(html)
+        incProgress(0.95, detail = "Save html file...")
+        temp_path <- tempfile()
+        remove_www_tempfiles(session, "hierachical.html")
+        html.file <- paste0(session$token, "_hierachical.html")
+        write(html, temp_path)
+        file.copy(temp_path, file.path("www/", html.file))
+        
+        output$hierachy_output_plot <- renderUI(
+          tags$iframe(
+            src = html.file,
+            width = "100%",
+            style = "height: 100vh;",
+            # Use CSS for full viewport height
+            frameBorder = "0"
+          )
+        )
+        neighbour_results <<- res_detailed.df
+      }, error = function(e)
+      {
+        if (e$message != "")
         {
-          if (e$message != "")
-          {
-            message.error <- paste0("Error computing hierarchical neighbourhood clusters: ",
-                                    e$message)
-            output$genepairsplots <- renderUI(NULL)
-            render_error_ui(message = message.error, output)
-            #output$errorreport <- renderText(message.error)
-            message(message.error)
-          }
-        })
+          message.error <- paste0("Error computing hierarchical neighbourhood clusters: ",
+                                  e$message)
+          output$genepairsplots <- renderUI(NULL)
+          render_error_ui(message = message.error, output)
+          #output$errorreport <- renderText(message.error)
+          message(message.error)
+        }
       })
-    }
-  )
+    })
+  })
   
   
   #Generate Network Graph that will
@@ -553,13 +662,16 @@ server <- function(input, output, session) {
     tryCatch({
       req(tr)
       chain <- input$chain_select_neighbours
-      genes <- tr$clone_df[[paste0("v_",substr(chain,1,1),"_gene")]]
+      genes <- tr$clone_df[[paste0("v_", substr(chain, 1, 1), "_gene")]]
       chain2check <- paste0("cdr3_", substring(chain, 1, 1), "_aa")
       pw_matrix = tr[[paste0("pw_", chain2check)]]
-      updateSelectizeInput(session, "v_gene_filter", 
-                           choices = c("All",genes), 
-                           server = TRUE) # This is the magic argument
-      output$dist_threshold_ui<-renderUI({
+      updateSelectizeInput(
+        session,
+        "v_gene_filter",
+        choices = c("All", genes),
+        server = TRUE
+      ) # This is the magic argument
+      output$dist_threshold_ui <- renderUI({
         tagList(
           sliderInput(
             "dist_threshold",
@@ -567,7 +679,7 @@ server <- function(input, output, session) {
             min = floor(min(pw_matrix)),
             max = ceiling(max(pw_matrix)),
             value = ceiling(median(pw_matrix))
-          ),  
+          ),
         )
       })
     }, error = function(e) {
@@ -594,30 +706,41 @@ server <- function(input, output, session) {
       tcr_metadata <- as.data.frame(nb)
       # Generate synthetic KNN results (Edge List)
       # In reality, this comes from your tcrdist3 'neighbors' output
-      chain.char<-substr(input$chain_select_neighbours,1,1)
+      chain.char <- substr(input$chain_select_neighbours, 1, 1)
       #chain2check <- paste0("cdr3_",chain.char, "_aa")
-      pw_matrix = tr[[paste0("pw_","cdr3_",chain.char, "_aa")]]
+      pw_matrix = tr[[paste0("pw_", "cdr3_", chain.char, "_aa")]]
       message("Chain starting character:", chain.char)
-      knn_edges<-tcr_metadata[,c("cid",paste0("cdr3_",chain.char,"_aa"),"epitope",paste0("v_",chain.char,"_gene"),"neighbors")] %>% unnest(neighbors)
-      colnames(knn_edges)<-c("from","cdr3_aa","epitope","v_gene","to")
-      rownames(knn_edges)<-NULL
-      knn_edges<-knn_edges[!duplicated(knn_edges),]
-      knn_edges<-knn_edges[order(knn_edges$from,decreasing = F),]
-      View(knn_edges)
-      tcr.data<-tcr_data()
-      clone.df<-tr$clone_df
-      save(clone.df,knn_edges,tcr.data,nb,pw_matrix,file="Test.RData")
-      knn_edges$distance <- as.numeric(apply(knn_edges,1,function(x) pw_matrix[x[["from"]],x[["to"]]]))
-      View(knn_edges)
-      stop()
-      tcr_metadata<-tcr_metadata[,c("cid",paste0("cdr3_",chain.char,"_aa"),paste0("v_",chain.char,"_gene"),"epitope")]
-      colnames(tcr_metadata)<-c("clone_id","cdr3_aa","v_gene","epitope")
+      knn_edges <- tcr_metadata[, c(
+        "cid",
+        paste0("cdr3_", chain.char, "_aa"),
+        "epitope",
+        paste0("v_", chain.char, "_gene"),
+        "neighbors"
+      )] %>% unnest(neighbors)
+      colnames(knn_edges) <- c("from", "cdr3_aa", "epitope", "v_gene", "to")
+      rownames(knn_edges) <- NULL
+      knn_edges <- knn_edges[!duplicated(knn_edges), ]
+      knn_edges <- knn_edges[order(knn_edges$from, decreasing = F), ]
+      tcr.data <- tcr_data()
+      clone.df <- tr$clone_df
+      save(clone.df, knn_edges, tcr.data, nb, pw_matrix, file = "Test.RData")
+      knn_edges$distance <- as.numeric(apply(knn_edges, 1, function(x)
+        pw_matrix[x[["from"]], x[["to"]]]))
+      #View(knn_edges)
+      #stop()
+      tcr_metadata <- tcr_metadata[, c(
+        "cid",
+        paste0("cdr3_", chain.char, "_aa"),
+        paste0("v_", chain.char, "_gene"),
+        "epitope"
+      )]
+      colnames(tcr_metadata) <- c("clone_id", "cdr3_aa", "v_gene", "epitope")
       nodes <- tcr_metadata
       edges <- knn_edges
       
       # Filter nodes by V-Gene if selected
       if (input$v_gene_filter != "All") {
-        valid_clones <- nodes %>% filter(grepl(input$v_gene_filter,v_gene)) %>% pull(clone_id)
+        valid_clones <- nodes %>% filter(grepl(input$v_gene_filter, v_gene)) %>% pull(clone_id)
         
         # Keep nodes matching filter OR nodes connected to them
         edges <- edges %>%
@@ -683,38 +806,80 @@ server <- function(input, output, session) {
       visInteraction(navigationButtons = TRUE) %>%
       visLegend()
   })
-  
+  output$showtrees <- reactive({
+    return("donotshow")
+  })
+  outputOptions(output, "showtrees", suspendWhenHidden = FALSE)
   #Populate trees
   observeEvent(input$run_trees, {
     render_error_ui("", output = output) #Clear any error messages
+    req(tcr_data())
     withProgress(message = 'Running trees...', value = 0, {
       tryCatch({
-        tr <- analysis_results()
+        #If more than one chain has been selected, then recompute distance matrix based on chain
+        chains <- strsplit(input$chains, ",")[[1]]
+        output$showtrees <- reactive({
+          return("show")
+        })
+        outputOptions(output, "showtrees", suspendWhenHidden = FALSE)
+        output$tree_output_plot<-renderUI(NULL)
+        if(length(chains)>1)
+        {
+          pd <- import("pandas")
+          inspect <- import("inspect")
+          message("Finished importing pandas")
+          TCRrep <- import("tcrdist.repertoire")$TCRrep
+          
+          message("Finished importing TCRrep")
+          incProgress(0.3, detail = "Preparing data...")
+          
+          # Convert R data frame to pandas DataFrame
+          cell_df <- r_to_py(tcr_data())
+          # Get chains for analysis
+          py <- import_main()
+          
+          message(paste0(chains, collapse = ":"))
+          chains <- list(input$chain_select_tree)
+          message(chains)
+          incProgress(0.5, detail = "Computing distances...")
+          # Initialize TCRrep object and compute distances
+          tr <- TCRrep(
+            cell_df = cell_df,
+            organism = r_to_py(input$organism),
+            chains = r_to_py(chains),
+            db_file = r_to_py(input$dbfile)
+          )  
+        } else{
+          tr <- analysis_results()
+        }
         req(tr)
         incProgress(0.1, detail = "Importing required library...")
+        
         TCRtree <- import("tcrdist.tree")
         incProgress(0.3, detail = "Preparing data...")
         file.name <- paste0(session$token, "_tree.html")
         temp.file <- tempfile()
         message("Temp file for trees: ", temp.file)
         remove_www_tempfiles(session, "tree.html")
+        message("Running trees")
         tcrtree = TCRtree$TCRtree(tcrrep = tr, html_name = temp.file)
         incProgress(0.5, detail = "Building tree...")
         tcrtree$build_tree()
         incProgress(0.9, detail = "Finalizing...")
         file.copy(temp.file, paste0("www/", file.name))
         output$tree_output_plot <- renderUI({
-          tags$iframe(
+          withSpinner(tags$iframe(
             src = file.name,
             width = "95%",
             style = "height: 90vh;",
             # Use CSS for full view port height
-            frameBorder = "0"
-          )
+            frameBorder = "0",
+            onload = "iframeLoaded()"
+          ))
         })
       }, error = function(e)
       {
-        message.error <- paste0("Error computing trees: ", e$message)
+        message.error <- paste0("Error generating tree: ", e$message)
         output$genepairsplots <- renderUI(NULL)
         render_error_ui(message = message.error, output)
         #output$errorreport <- renderText(message.error)

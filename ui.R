@@ -8,7 +8,6 @@
 # --- UI Definition ---
 ui <- page_sidebar(
   title = "TCRdist3 Shiny",
-  useShinyalert(),
   theme = bs_theme(
     bootswatch = "cosmo",
     #"darkly", #cosmo","flatly", "darkly", "journal"
@@ -206,15 +205,40 @@ ui <- page_sidebar(
       tabPanel(
         "Trees",
         hr(),
-        actionButton(
-          "run_trees",
-          HTML(
-            "<span class='glyphicon glyphicon-play-circle'></span> Get Trees"
+        layout_sidebar(
+          # The Sidebar
+          sidebar = sidebar(
+            h5("Options"),
+            uiOutput("chain_select_ui_trees"),
+            br(),
+            actionButton(
+              "run_trees",
+              HTML(
+                "<span class='glyphicon glyphicon-play-circle'></span> Get Trees"
+              )
+            )
+          ),
+          card(
+            conditionalPanel(
+            condition="output.showtrees=='show'",
+            withSpinner(uiOutput("tree_output_plot"))
+            ),
+            #uiOutput("tree_output_plot"),
+            full_screen = TRUE 
+            #withSpinner(DT::dataTableOutput("fixedradius_output")),
           )
-        ),
-        hr(),
-        uiOutput("tree_output_plot"),
-        hr(),
+        )
+        
+        # 
+        # actionButton(
+        #   "run_trees",
+        #   HTML(
+        #     "<span class='glyphicon glyphicon-play-circle'></span> Get Trees"
+        #   )
+        # ),
+        # hr(),
+        # uiOutput("tree_output_plot"),
+        # hr(),
       ),
       tabPanel("Export Results", hr(), p("")),
       tabPanel(
