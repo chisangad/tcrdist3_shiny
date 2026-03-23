@@ -44,6 +44,39 @@ remove_www_tempfiles <- function(session, pattern = "*")
   }
 }
 
+
+# Function to get distance matrix for a specific epitope
+get_epitope_dist_matrix <- function(df,epitope_name=NULL,organism,chains,dbfile) {
+  # Subset for specific epitope
+  if(!is.null(epitope_name))
+    subset_df <- df[df$epitope == epitope_name, ]
+  else
+    subset_df<-df
+  
+  pd <- import("pandas")
+  message("Finished importing pandas")
+  TCRrep <- import("tcrdist.repertoire")$TCRrep
+  message("Finished importing TCRrep")
+  # Convert R data frame to pandas DataFrame
+  cell_df <- r_to_py(subset_df)
+  # Get chains for analysis
+  py <- import_main()
+
+  if (length(chains) == 1)
+    chains <- list(chains)
+  
+  # Initialize TCRrep object and compute distances
+  tr <- TCRrep(
+    cell_df = cell_df,
+    organism = r_to_py(organism),
+    chains = r_to_py(chains),
+    db_file = r_to_py(dbfile)
+  )
+  # Return the tr object
+  return(tr)
+}
+
+
 # --- Server Logic ---
 server <- function(input, output, session) {
   neighbour_results <- NULL
@@ -56,6 +89,7 @@ server <- function(input, output, session) {
   })
   
   outputOptions(output, "csvtest", suspendWhenHidden = FALSE)
+  
   # Reactive value to store the TCR data
   tcr_data <- reactive({
     render_error_ui("", output = output) #Clear any error messages
@@ -63,6 +97,12 @@ server <- function(input, output, session) {
     # Determine separator based on file extension
     sep <- ifelse(tools::file_ext(input$file1$name) == "tsv", "\t", ",")
     read.csv(input$file1$datapath, sep = sep)
+  })
+  
+  # Reactive distance matrix calculation
+  dist_mat <- reactive({
+    # data <- read.csv("your_tcr_data.csv")
+    get_epitope_dist_matrix(tcr_data(), input$epitope)
   })
   
   
@@ -83,16 +123,10 @@ server <- function(input, output, session) {
     withProgress(message = 'Running TCRdist3 analysis...', value = 0, {
       tryCatch({
         incProgress(0.1, detail = "Importing Python modules...")
-        #message(py_config())
         #Import necessary python libraries
         pd <- import("pandas")
         inspect <- import("inspect")
-        message("Finished importing pandas")
-        TCRrep <- import("tcrdist.repertoire")$TCRrep
-        
-        message("Finished importing TCRrep")
-        incProgress(0.3, detail = "Preparing data...")
-        
+        incProgress(0.3, detail = "Initialising...")
         # Convert R data frame to pandas DataFrame
         cell_df <- r_to_py(tcr_data())
         # Get chains for analysis
@@ -101,93 +135,19 @@ server <- function(input, output, session) {
         chains <- strsplit(input$chains, ",")[[1]]
         message(paste0(chains, collapse = ":"))
         
-        if (length(chains) == 1)
-          chains <- list(chains)
         
         incProgress(0.5, detail = "Computing distances...")
+        
         # Initialize TCRrep object and compute distances
-        tr <- TCRrep(
-          cell_df = cell_df,
-          organism = r_to_py(input$organism),
-          chains = r_to_py(chains),
-          db_file = r_to_py(input$dbfile)
+        tr <- get_epitope_dist_matrix(
+          tcr_data(),
+          organism = input$organism,
+          chains = chains,
+          dbfile = input$dbfile
         )
+
         #message(paste0(names(tr),collapse = "\n"))
         incProgress(0.8, detail = "Finalizing...")
-        #Get chains from the distance compute
-        all.tr_names <- names(tr)
-        chains_tr <- all.tr_names[grepl("^pw_", all.tr_names)]
-        chains_tr_only <- gsub("pw_", "", chains_tr[!grepl("cdr|pmhc", chains_tr)])
-        #Include a select option for the chains
-        output$matrixoptions <- renderUI({
-          tagList(
-            hr(),
-            selectInput(
-              "matrix_select",
-              "Select distance matrix:",
-              selected = chains_tr[1],
-              choices = chains_tr
-            ),
-            hr()
-          )
-        })
-        
-        epitopes <- unique(tr$clone_df$epitope)
-        genes <- names(tr$clone_df)[grepl("gene", names(tr$clone_df))]
-        
-        #Load selection input for epitopes
-        output$col_select_ui <- renderUI({
-          tagList(
-            selectizeInput("epitope_sel", "Select Epitope:", choices = epitopes),
-            selectizeInput(
-              "columns_sel",
-              "Select Columns:",
-              choices = genes,
-              multiple = T
-            )
-          )
-        })
-        #Load epitopes in Neighbourhood
-        output$epitope_select_ui <- renderUI({
-          tagList(selectizeInput("epitope_sel_n", "Select Epitope:", choices = epitopes))
-        })
-        
-        output$epitope_select_hierarch_ui <- renderUI({
-          tagList(selectizeInput("epitope_sel_h", "Select Epitope:", choices = epitopes))
-        })
-        
-        #Load chains in Neighbourhood
-        output$chain_select_ui <- renderUI({
-          tagList(
-            selectInput(
-              "chain_select_neighbours",
-              "Select a chain:",
-              selected = chains_tr_only[1],
-              choices = chains_tr_only
-            )
-          )
-        })
-        output$chain_select_ui_trees<-renderUI({
-          tagList(
-            selectInput(
-              "chain_select_tree",
-              "Select a chain:",
-              selected = chains_tr_only[1],
-              choices = chains_tr_only
-            )
-        )})
-          
-        output$chain_select_ui_knn <- renderUI({
-          tagList(
-            selectInput(
-              "chain_select_knn",
-              "Select a chain:",
-              selected = chains_tr_only[1],
-              choices = chains_tr_only
-            )
-          )
-        })
-        
         return(tr)
       }, error = function(e)
       {
@@ -202,12 +162,129 @@ server <- function(input, output, session) {
     })
   })
   
+  #Update selectisize options with values based on all results
+  observe({
+    req(analysis_results())
+    tr<-analysis_results()
+    #Get epitopes
+    epitopes <- unique(tcr_data()$epitope)
+    #Get chains from the distance compute
+    all.tr_names <- names(tr)
+    chains_tr <- all.tr_names[grepl("^pw_", all.tr_names)]
+    
+    chains_tr_only <- gsub("pw_", "", chains_tr[!grepl("cdr|pmhc", chains_tr)])
+    genes <- names(tr$clone_df)[grepl("gene", names(tr$clone_df))]
+    #Load selection input for epitopes
+    output$col_select_ui <- renderUI({
+      tagList(
+        selectizeInput("epitope_sel", "Select Epitope:", choices = epitopes),
+        selectizeInput(
+          "columns_sel",
+          "Select Columns:",
+          choices = genes,
+          multiple = T
+        )
+      )
+    })
+    
+    #Include a select option for the chains
+    output$matrixoptions <- renderUI({
+      tagList(
+        selectInput(
+          "chain_select_heatmap",
+          "Select a chain:",
+          selected = chains_tr_only[1],
+          choices = chains_tr_only
+        ),
+        selectizeInput("epitope_sel_heatmap", 
+                       "Select Epitope:", 
+                       choices = epitopes)
+      )
+    })
+    
+    #Load epitopes in Neighbourhood
+    output$epitope_select_ui <- renderUI({
+      tagList(selectizeInput("epitope_sel_n", "Select Epitope:", choices = epitopes))
+    })
+    
+    output$epitope_select_hierarch_ui <- renderUI({
+      tagList(selectizeInput("epitope_sel_h", "Select Epitope:", choices = epitopes))
+    })
+    
+    #Load chains in Neighbourhood
+    output$chain_select_ui <- renderUI({
+      tagList(
+        selectInput(
+          "chain_select_neighbours",
+          "Select a chain:",
+          selected = chains_tr_only[1],
+          choices = chains_tr_only
+        )
+      )
+    })
+    output$chain_select_ui_trees <- renderUI({
+      tagList(
+        selectInput(
+          "chain_select_tree",
+          "Select a chain:",
+          selected = chains_tr_only[1],
+          choices = chains_tr_only
+        )
+      )
+    })
+    
+    output$chain_select_ui_knn <- renderUI({
+      tagList(
+        selectInput(
+          "chain_select_knn",
+          "Select a chain:",
+          selected = chains_tr_only[1],
+          choices = chains_tr_only
+        )
+      )
+    })
+  })
+  
+  
+  #Update distance matrix options based on selected chain when updating heatmap
+  observeEvent(input$chain_select_heatmap,{
+    req(analysis_results())
+    tr<-analysis_results()
+    #Get chains from the distance compute
+    all.tr_names <- names(tr)
+    message(paste0(all.tr_names, collapse = "\n"))
+    chain.selected<-input$chain_select_heatmap
+    chains_tr <- all.tr_names[grepl("^pw", all.tr_names)]
+    chain.start<-substr(chain.selected,1,1)
+    pattern <- paste0("^[^_]+_([",chain.start,"cp]([^_]+_",chain.start,"|[^_]*$))")
+    chains_tr <- chains_tr[grepl(pattern,chains_tr)]
+    message(chains_tr)
+    #Include a select option for the chains
+    output$matrixoptions2 <- renderUI({
+      tagList(
+        selectInput(
+          "matrix_select",
+          "Select distance matrix:",
+          selected = chains_tr[1],
+          choices = chains_tr
+        ),
+      )
+    })
+  })
+  
+  
   #Update heatmap and matrix table on the following events
-  observeEvent(c(input$run, input$matrix_select), {
+  observeEvent(input$run_heatmap, {
     render_error_ui("", output = output) #Clear any error messages
     tryCatch({
-      results <- analysis_results()
-      req(results)
+      req(tcr_data())
+      results <- get_epitope_dist_matrix(
+        tcr_data(),
+        organism = input$organism,
+        chains = input$chain_select_heatmap,
+        dbfile = input$dbfile,
+        epitope_name = input$epitope_sel_heatmap
+      )
       render_error_ui("", output)
       chain2check <- gsub("pw_", "", (input$matrix_select))
       if (sum(chain2check %in% colnames(results$clone_df)) == 0)
@@ -243,7 +320,7 @@ server <- function(input, output, session) {
             )
           )
         )
-      }, server = F)
+      }, server = T)
       
       # Display the distance matrix
       session.id <- session$token
@@ -302,18 +379,29 @@ server <- function(input, output, session) {
             )
           )
         )
-      }, server = F)
+      }, server = T)
+      
+        # Create the static ComplexHeatmap
+        ht <- Heatmap(mat,
+                      name = "TCRdist",
+                      column_title = paste("Clonotypes for", input$epitope_sel_heatmap),
+                      show_row_dend = TRUE,
+                      show_column_dend = TRUE)
+
+        # Make it interactive in Shiny
+        makeInteractiveComplexHeatmap(input, output, session, ht, "heatmap")
+      
       
       # Display the heatmap
-      output$heatmap <- renderPlot({
-        pheatmap(
-          mat,
-          clustering_distance_rows = "euclidean",
-          clustering_distance_cols = "euclidean",
-          clustering_method = "ward.D2",
-          main = "TCR Distance Heatmap"
-        )
-      })
+      # output$heatmap <- renderPlot({
+      #   pheatmap(
+      #     mat,
+      #     clustering_distance_rows = "euclidean",
+      #     clustering_distance_cols = "euclidean",
+      #     clustering_method = "ward.D2",
+      #     main = "TCR Distance Heatmap"
+      #   )
+      #})
     }, error = function(e)
     {
       if (e$message != "")

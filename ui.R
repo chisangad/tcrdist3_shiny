@@ -93,17 +93,31 @@ ui <- page_sidebar(
           tabPanel("Summary", tags$br(), 
                    DT::dataTableOutput("summary_matrix")),
           tabPanel(
-            "Heatmaps",
-            uiOutput("matrixoptions"),
-            hr(),
-            withSpinner(
-              plotOutput("heatmap", height = "900px"),
-              type = 6,
-              color = "#75AADB"
+            "Heatmap",
+            layout_sidebar( 
+              sidebar=sidebar(
+              h5("Options"),
+              hr(), 
+              uiOutput("matrixoptions"),
+              uiOutput("matrixoptions2"),
+              hr(),
+              actionButton(
+                "run_heatmap",
+                HTML(
+                  "<span class='glyphicon glyphicon-play-circle'></span> Show heatmap"
+                )
+              )
             ),
+            card(
+              withSpinner(
+                InteractiveComplexHeatmapOutput("heatmap",compact = T),
+                #plotOutput("heatmap", height = "900px"),
+                type = 6,
+                color = "#75AADB"
+              ),
             hr(),
             DT::dataTableOutput("dist_matrix")
-          ),
+          ))),
           tabPanel(
             "Clones",
             tags$br(),

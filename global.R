@@ -79,6 +79,20 @@ if(!require(shinyalert))
   library(shinyalert)
 }
 
+if(!require(ComplexHeatmap))
+{
+  installed.packages("ComplexHeatmap")
+  library("ComplexHeatmap")
+}
+
+if(!require("InteractiveComplexHeatmap"))
+{
+  #install.packages("InteractiveComplexHeatmap")
+  BiocManager::install("InteractiveComplexHeatmap")
+  library("InteractiveComplexHeatmap")
+}
+
+
 # py_run_string("
 # def process_list(my_list):
 #         return my_list
