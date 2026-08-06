@@ -13,6 +13,16 @@ ui <- page_sidebar(
     #"darkly", #cosmo","flatly", "darkly", "journal"
     base_font = font_google("Roboto")
   ),
+  # tags$head(
+  #   tags$style(HTML("
+  #     /* Target the selected items (tags) inside the selectize input */
+  #     .selectize-input .item {
+  #       background-color: orange !important;
+  #       background-image: none !important; /* Removes the default blue gradient */
+  #       color: black !important;           /* Sets text color */
+  #       border: 1px solid darkorange !important; /* Optional: adds a matching border */
+  #     }
+  #   "))),
   #fluidPage(titlePanel("TCRdist3 Analysis"),
   sidebar = sidebar(
     # sidebarLayout(
@@ -88,45 +98,100 @@ ui <- page_sidebar(
   card(
     tabsetPanel(
       tabPanel(
-        "TCR Distance",
-        conditionalPanel(condition = "output.csvtest", tabsetPanel(
-          tabPanel("Summary", tags$br(), 
-                   DT::dataTableOutput("summary_matrix")),
-          tabPanel(
-            "Heatmap",
-            layout_sidebar( 
-              sidebar=sidebar(
-              h5("Options"),
-              hr(), 
-              uiOutput("matrixoptions"),
-              uiOutput("matrixoptions2"),
-              hr(),
-              actionButton(
-                "run_heatmap",
-                HTML(
-                  "<span class='glyphicon glyphicon-play-circle'></span> Show heatmap"
-                )
-              )
-            ),
-            card(
-              withSpinner(
-                InteractiveComplexHeatmapOutput("heatmap",compact = T),
-                #plotOutput("heatmap", height = "900px"),
-                type = 6,
-                color = "#75AADB"
-              ),
-            hr(),
-            DT::dataTableOutput("dist_matrix")
-          ))),
-          tabPanel(
-            "Clones",
-            tags$br(),
-            withSpinner(DT::dataTableOutput("clone_matrix")),
-            hr(),
-            downloadButton("download_data", "Download Clone Matrix")
-          )
-        ))
+        "Summary",
+        tags$br(),
+        layout_columns(
+          col_widths = c(4, 8),
+          plotOutput("summaryPlot"),
+          DT::dataTableOutput("summary_matrix")
+        ),
+        uiOutput("networkcard")
       ),
+      
+      ##############TCR Distance Tab##############
+      tabPanel("TCR Distance",
+               hr(),
+               conditionalPanel(condition = "output.csvtest", 
+               tabsetPanel(
+                 card(tabsetPanel(
+                   tabPanel(
+                     "Heatmap",
+                     layout_sidebar(
+                       sidebar = sidebar(
+                         h5("Options"),
+                         hr(),
+                         uiOutput("matrixoptions"),
+                         uiOutput("matrixoptions2"),
+                         actionButton(
+                           "run_heatmap",
+                           HTML(
+                             "<span class='glyphicon glyphicon-play-circle'></span> Load heatmap"
+                           )
+                         ),
+                         hr(),
+                         h6("Heatmap options"),
+                         checkboxInput("show_row_names", "Show Row Labels", value = F),
+                         checkboxInput("show_col_names", "Show Column Labels", value = F)
+                       ),
+                       card(
+                     withSpinner(
+                       #uiOutput("heatmap_container"),
+                       InteractiveComplexHeatmapOutput(
+                         "heatmap",
+                         layout = "1|(2-3)",
+                         compact = T,
+                         width1 = "800px",
+                         height1 = "700px"
+                       ),
+                       type = 6,
+                       color = "#75AADB"
+                     ),
+                     hr(),
+                     withSpinner(DT::dataTableOutput("dist_matrix"))
+                   ))),
+                   #tabPanel("Distance Matrix", withSpinner(DT::dataTableOutput("dist_matrix"))),
+                   tabPanel("kPCA", layout_sidebar(
+                     sidebar = sidebar(
+                       h5("Options"),
+                       hr(),
+                       uiOutput("kpca_chain_option"),
+                       uiOutput("kpca_repertoire_option"),
+                       actionButton(
+                         "run_kpca",
+                         HTML(
+                           "<span class='glyphicon glyphicon-play-circle'></span> Load kPCA"
+                         )
+                       ),
+                       hr(),
+                       h6("KPCA options"),
+                       checkboxInput("kpca_facet", "Show all", value = F),
+                       conditionalPanel(
+                         condition = "!input.kpca_facet",
+                         uiOutput("kpca_colorby_option")
+                       )
+                     ),
+                     card(
+                          card_header("Dataset Overview"),
+                          plotlyOutput("kpcaPlot"),
+                          full_screen = TRUE, # bslib magic: adds an 'expand' icon automatically
+                          card_footer("Click the expand icon in the bottom right to go full screen."))
+                   )), 
+                   tabPanel("Diversity", card(
+                        plotOutput("diversityPlot"),
+                        plotOutput("simpsonPlot"),
+                        plotOutput("invSimpsonPlot")
+                   )),
+                   tabPanel(
+                     "Clones",
+                     tags$br(),
+                     plotOutput("topCdr3Plot"),
+                     hr(),
+                     withSpinner(DT::dataTableOutput("clone_matrix")),
+                     hr(),
+                     downloadButton("download_data", "Download Clone Matrix")
+                   )
+                 ))
+               ))),
       tabPanel(
         "Gene Level Analysis",
         hr(),
