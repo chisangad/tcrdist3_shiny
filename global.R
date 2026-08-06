@@ -22,22 +22,22 @@ packages <- list(
 )
 
 # Flatten and load all packages
-all_packages <- unlist(packages)
-for (pkg in all_packages) {
-  if (!require(pkg, character.only = TRUE, quietly = TRUE)) {
-    # Special handling for BioConductor packages
-    if (pkg == "InteractiveComplexHeatmap") {
-      message(paste0("Installing ", pkg, " from BioConductor..."))
-      if (!require("BiocManager", quietly = TRUE)) {
-        install.packages("BiocManager")
-      }
-      BiocManager::install(pkg, ask = FALSE)
-    } else {
-      install.packages(pkg, dependencies = TRUE)
-    }
-    library(pkg, character.only = TRUE)
-  }
-}
+# all_packages <- unlist(packages)
+# for (pkg in all_packages) {
+#   if (!require(pkg, character.only = TRUE, quietly = TRUE)) {
+#     # Special handling for BioConductor packages
+#     if (pkg == "InteractiveComplexHeatmap") {
+#       message(paste0("Installing ", pkg, " from BioConductor..."))
+#       if (!require("BiocManager", quietly = TRUE)) {
+#         install.packages("BiocManager")
+#       }
+#       BiocManager::install(pkg, ask = FALSE)
+#     } else {
+#       install.packages(pkg, dependencies = TRUE)
+#     }
+#     library(pkg, character.only = TRUE)
+#   }
+# }
 # py_run_string("
 # def process_list(my_list):
 #         return my_list
