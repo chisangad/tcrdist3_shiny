@@ -7,6 +7,7 @@
 
 # --- UI Definition ---
 ui <- page_sidebar(
+  use_tracking(),
   title = "TCRdist3 Shiny",
   theme = bs_theme(
     bootswatch = "cosmo",

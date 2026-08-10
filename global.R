@@ -7,14 +7,14 @@
 # - TCR-specific: ComplexHeatmap, InteractiveComplexHeatmap, kernlab
 # - Python/reticulate: reticulate
 # - Other: visNetwork, openxlsx
-
+message("Checking if packages exist, install and load")
 packages <- list(
   # Core dependencies
-  core = c("reticulate", "shiny", "shinyjs", "shinyalert", "bslib", "shinycssloaders"),
+  core = c("reticulate", "shiny", "shinyjs", "shinyalert", "bslib", "shinycssloaders","shinylogs"),
   # Data wrangling & visualization
   data = c("tidyverse", "plotly", "DT"),
   # Heatmap & kernel methods
-  heatmap = c("ComplexHeatmap", "kernlab"),
+  heatmap = c("ComplexHeatmap", "kernlab","InteractiveComplexHeatmap"),
   # Network visualization
   network = c("visNetwork"),
   # Utilities
@@ -22,30 +22,33 @@ packages <- list(
 )
 
 # Flatten and load all packages
-# all_packages <- unlist(packages)
-# for (pkg in all_packages) {
-#   if (!require(pkg, character.only = TRUE, quietly = TRUE)) {
-#     # Special handling for BioConductor packages
-#     if (pkg == "InteractiveComplexHeatmap") {
-#       message(paste0("Installing ", pkg, " from BioConductor..."))
-#       if (!require("BiocManager", quietly = TRUE)) {
-#         install.packages("BiocManager")
-#       }
-#       BiocManager::install(pkg, ask = FALSE)
-#     } else {
-#       install.packages(pkg, dependencies = TRUE)
-#     }
-#     library(pkg, character.only = TRUE)
-#   }
-# }
-# py_run_string("
-# def process_list(my_list):
-#         return my_list
-# ")
+all_packages <- unlist(packages)
+for (pkg in all_packages) {
+  if (!require(pkg, character.only = TRUE, quietly = TRUE)) {
+    # Special handling for BioConductor packages
+    if (pkg %in% c("InteractiveComplexHeatmap","ComplexHeatmap")) {
+      message(paste0("Installing ", pkg, " from BioConductor..."))
+      if (!require("BiocManager", quietly = TRUE)) {
+        install.packages("BiocManager")
+      }
+      BiocManager::install(pkg, ask = FALSE)
+    } else {
+      install.packages(pkg, dependencies = TRUE)
+    }
+    library(pkg, character.only = TRUE)
+  }
+}
+
+message("Packages loaded!")
+
+py_run_string("
+def process_list(my_list):
+        return my_list
+")
 
 # --- Python Environment Setup ---
 env_name <- "tcrdist3_env"
-
+message("Check if Conda environment exists")
 setup_conda_environment <- function(env_name = "tcrdist3_env") {
   tryCatch({
     if (!reticulate::condaenv_exists(env_name)) {
@@ -70,7 +73,7 @@ setup_conda_environment <- function(env_name = "tcrdist3_env") {
 
 # Initialize conda environment
 setup_conda_environment(env_name)
-
+message("Conda environment loaded")
 #' Generate kPCA Plot from tcrdist3 data
 #'
 #' @param dist_matrix A square distance matrix (from tcrdist3 $pw_beta or $pw_alpha)
@@ -490,3 +493,5 @@ generate_network <- function(tr, edge_threshold) {
   
   return(df_net)
 }
+
+message("Global file loaded!")

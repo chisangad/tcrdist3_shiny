@@ -6,6 +6,9 @@ source("global.R")
 # A reusable function to render a styled error message
 # --- Server Logic ---
 server <- function(input, output, session) {
+  track_usage(
+    storage_mode = store_json(path = "logs/")
+  )
   neighbour_results <- NULL
   # Per-session flag (was a module-level global shared across all users)
   hierarch_tabs_check <- reactiveVal(FALSE)
