@@ -7,7 +7,7 @@
 
 # --- UI Definition ---
 ui <- page_sidebar(
-  use_tracking(),
+  #use_tracking(),
   title = "TCRdist3 Shiny",
   theme = bs_theme(
     bootswatch = "cosmo",
@@ -49,7 +49,7 @@ ui <- page_sidebar(
       "organism",
       "Organism:",
       choices = c("human", "mouse"),
-      selected = "human"
+      selected = "mouse"
     ),
     
     selectInput(
@@ -63,9 +63,14 @@ ui <- page_sidebar(
       "dbfile",
       "DB file:",
       choices = c(
-        'alphabeta_gammadelta_db.tsv',
-        'alphabeta_db.tsv',
-        'gammadelta_db.tsv'
+        "alpha beta & gammadelta"='alphabeta_gammadelta_db.tsv',
+        adaptive_imgt_mapping='adaptive_imgt_mapping.csv',
+        combo_db='combo_db.tsv',
+        "combo_xcr_2023-12-30"='combo_xcr_2023-12-30.tsv',
+        "combo_xcr_2024-03-05"='combo_xcr_2024-03-05.tsv'
+        # 'alphabeta_gammadelta_db.tsv',
+        # 'alphabeta_db.tsv',
+        # 'gammadelta_db.tsv'
       ),
       selected = "alphabeta_gammadelta_db.tsv"
     ),
@@ -98,6 +103,9 @@ ui <- page_sidebar(
   
   card(
     tabsetPanel(
+      ##############################################################
+      #.                         Summary Panel                     #
+      ##############################################################
       tabPanel(
         "Summary",
         tags$br(),
@@ -106,10 +114,12 @@ ui <- page_sidebar(
           plotOutput("summaryPlot"),
           DT::dataTableOutput("summary_matrix")
         ),
+        
         uiOutput("networkcard")
       ),
-      
-      ##############TCR Distance Tab##############
+      ###########################################################
+      #                        TCR Distance Tab                 #
+      ###########################################################
       tabPanel("TCR Distance",
                hr(),
                conditionalPanel(condition = "output.csvtest", 
@@ -193,6 +203,9 @@ ui <- page_sidebar(
                    )
                  ))
                ))),
+      ###########################################################
+      #                        Gene Level Analysis              #
+      ###########################################################
       tabPanel(
         "Gene Level Analysis",
         hr(),
@@ -201,6 +214,9 @@ ui <- page_sidebar(
         hr(),
         htmlOutput("genepairsplots")
       ),
+      ###########################################################
+      #                        Neighbourhoods                   #
+      ###########################################################
       tabPanel(
         "Neighbourhoods",
         hr(),
@@ -231,6 +247,9 @@ ui <- page_sidebar(
               )
             )
           ),
+          ###########################################################
+          #                        Hierarchical Clustering Tab      #
+          ###########################################################          
           tabPanel(
             "Hierarchical",
             hr(),
@@ -282,6 +301,55 @@ ui <- page_sidebar(
           )
         )
       ),
+      ###########################################################
+      #                        Motifs                           #
+      ###########################################################      
+      tabPanel(
+        "Motif Enrichment",
+        hr(),
+        layout_sidebar(
+          # The Sidebar
+          sidebar = sidebar(
+            h5("Options"),
+            uiOutput("epitope_select_ui_motif"),
+            uiOutput("chain_select_ui_motif"),
+            uiOutput("motif_radius_ui"),
+            uiOutput("cluster_selector_select_ui"),
+            uiOutput("cluster_select_ui"),
+            hr(),
+            uiOutput("cluster_summary"),  
+            br(),
+            actionButton(
+              "run_motifs",
+              HTML(
+                "<span class='glyphicon glyphicon-play-circle'></span> Get Motifs"
+              )
+            )
+          ),
+          card(
+            tabsetPanel(
+              tabPanel("Motif Logo",
+                       plotOutput("motif_plot"),
+                       #uiOutput("motif_svg"),
+                       tableOutput("motif_table")
+              ),
+              tabPanel("Cluster Details",
+                       h4("Sequences in this cluster"),
+                       DTOutput("cluster_seq_table"),
+                       h4("V gene usage"),
+                       plotOutput("v_gene_plot", height = "250px"),
+                       h4("J gene usage"),
+                       plotOutput("j_gene_plot", height = "250px")
+              )
+              ),
+            full_screen = TRUE 
+            #withSpinner(DT::dataTableOutput("fixedradius_output")),
+          )
+        )
+      ),
+      ###########################################################
+      #                        Trees                            #
+      ###########################################################      
       tabPanel(
         "Trees",
         hr(),
@@ -289,6 +357,7 @@ ui <- page_sidebar(
           # The Sidebar
           sidebar = sidebar(
             h5("Options"),
+            uiOutput("epitope_select_ui_trees"),
             uiOutput("chain_select_ui_trees"),
             br(),
             actionButton(
@@ -320,6 +389,9 @@ ui <- page_sidebar(
         # uiOutput("tree_output_plot"),
         # hr(),
       ),
+      ###########################################################
+      #                        Export Results                   #
+      ###########################################################
       tabPanel("Export Results", hr(), p("")),
       tabPanel(
         "About",

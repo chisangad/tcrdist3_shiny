@@ -7,10 +7,14 @@
 # - TCR-specific: ComplexHeatmap, InteractiveComplexHeatmap, kernlab
 # - Python/reticulate: reticulate
 # - Other: visNetwork, openxlsx
+
+path2conda=normalizePath("~/miniconda3/envs/tcrdist3_env/bin/python")
+Sys.setenv(RETICULATE_PYTHON = path2conda)
+
 message("Checking if packages exist, install and load")
 packages <- list(
   # Core dependencies
-  core = c("reticulate", "shiny", "shinyjs", "shinyalert", "bslib", "shinycssloaders","shinylogs"),
+  core = c("reticulate", "shiny", "shinyjs", "shinyalert", "bslib", "shinycssloaders","shinylogs","ggseqlogo"),
   # Data wrangling & visualization
   data = c("tidyverse", "plotly", "DT"),
   # Heatmap & kernel methods
@@ -74,6 +78,7 @@ setup_conda_environment <- function(env_name = "tcrdist3_env") {
 # Initialize conda environment
 setup_conda_environment(env_name)
 message("Conda environment loaded")
+
 #' Generate kPCA Plot from tcrdist3 data
 #'
 #' @param dist_matrix A square distance matrix (from tcrdist3 $pw_beta or $pw_alpha)
@@ -228,7 +233,6 @@ get_epitope_dist_matrix <- function(df,
     chains = r_to_py(chains),
     db_file = r_to_py(dbfile)
   )
-  tr$compute_distances()
   cat("Done computing distances\n")
   # Return the tr object
   return(tr)
@@ -253,7 +257,7 @@ get_epitope_dist_matrix <- function(df,
 #'   of a TCRrep object that the rest of the app relies on, so it can be
 #'   used as a drop-in replacement wherever `tr$clone_df` / `tr[[pw_name]]`
 #'   are accessed.
-subset_tr_by_epitope <- function(tr, epitope_name = NULL) {
+subset_tr_by_epitope <- function(tr, epitope_name = NULL,chain=NULL) {
   clone_df <- as.data.frame(tr$clone_df)
   if (!is.null(epitope_name)) {
     idx <- which(clone_df$epitope %in% epitope_name)
@@ -266,7 +270,14 @@ subset_tr_by_epitope <- function(tr, epitope_name = NULL) {
     mat <- tr[[pw]]
     result[[pw]] <- mat[idx, idx, drop = FALSE]
   }
-  result
+  write.table(data.frame(Names=names(tr)),file="Columns.txt")
+  chains.keep<-tr[["chains"]]
+  if(!is.null(chain))
+  {
+    chains.keep<-list(chains.keep[chains.keep %in% chain])  
+  }
+  result[["chains"]]<-chains.keep
+  return(result)
 }
 
 
@@ -439,12 +450,21 @@ generate_clustered_heatmap<-function(tr)
 #' max_dist <- max(tr$pw_alpha + tr$pw_beta)
 #' net <- generate_network(tr, edge_threshold = max_dist / 2)
 #'
-generate_network <- function(tr, edge_threshold) {
+generate_network <- function(tr, edge_threshold, removeselfloops) {
   clone_df <- as.data.frame(tr$clone_df)
-  
   # Sum alpha and beta pairwise distance matrices to get combined distance
   # (this allows measuring TCR similarity accounting for both chains)
-  pw_alpha_beta <- tr$pw_alpha + tr$pw_beta
+  chains<-tr[["chains"]][[1]]
+  print(chains)
+  pw_alpha_beta<-NULL
+  for(i in chains)
+  {
+    if(is.null(pw_alpha_beta))
+      pw_alpha_beta<-tr[[paste0("pw_",i)]]
+    else
+      pw_alpha_beta <- pw_alpha_beta+tr[[paste0("pw_",i)]]
+  }
+    
   
   # Find all pairs of clones with combined distance <= threshold
   # (excluding self-edges via row(...) != col(...))
@@ -467,6 +487,8 @@ generate_network <- function(tr, edge_threshold) {
     node_1      = node_1_idx - 1,                      # 0-indexed
     node_2      = node_2_idx - 1,                      # 0-indexed
     dist        = pw_alpha_beta[edges],
+    v_a_gene_1  = clone_df$v_a_gene[node_1_idx],
+    v_a_gene_2  = clone_df$v_a_gene[node_2_idx],
     v_b_gene_1  = clone_df$v_b_gene[node_1_idx],
     v_b_gene_2  = clone_df$v_b_gene[node_2_idx],
     cdr3_b_aa_1 = clone_df$cdr3_b_aa[node_1_idx],
@@ -482,16 +504,114 @@ generate_network <- function(tr, edge_threshold) {
     # Create temporary sorted columns to identify matching pairs
     min_col = pmin(node_1, node_2),
     max_col = pmax(node_1, node_2)
-  ) %>%
+  ) %>% 
     # Keep only the first occurrence of each pair
-    distinct(min_col, max_col, .keep_all = TRUE) %>%
+    distinct(min_col, max_col, .keep_all = T) %>%
     # Remove the temporary columns
     select(-min_col, -max_col)
   
   #find self loops
-  
-  
+  if(removeselfloops)
+  {
+    #match all self loops and remove them from the rest of the analysis
+    if(length(chains)>1){
+        df_net<-df_net[df_net$cdr3_b_aa_1!=df_net$cdr3_b_aa_2&df_net$cdr3_a_aa_1!=df_net$cdr3_a_aa_2,]
+        
+        df_net<- df_net %>% mutate(
+          # Create temporary sorted columns to identify matching pairs
+          min_col = pmin(cdr3_a_aa_1, cdr3_a_aa_2),
+          max_col = pmax(cdr3_a_aa_2, cdr3_a_aa_1)
+        ) %>% 
+          # Keep only the first occurrence of each pair
+          distinct(min_col, max_col, .keep_all = T) %>%
+          # Remove the temporary columns
+          select(-min_col, -max_col) %>%
+          mutate(
+            # Create temporary sorted columns to identify matching pairs
+            min_col = pmin(cdr3_b_aa_1, cdr3_b_aa_2),
+            max_col = pmax(cdr3_b_aa_2, cdr3_b_aa_1)
+          ) %>% 
+          # Keep only the first occurrence of each pair
+          distinct(min_col, max_col, .keep_all = T) %>%
+          # Remove the temporary columns
+          select(-min_col, -max_col) %>%
+          filter(!(cdr3_a_aa_1 == cdr3_a_aa_2 & cdr3_b_aa_1 == cdr3_b_aa_2)) %>%
+          mutate(
+            # Create temporary sorted columns to identify matching pairs
+            min_col = pmin(cdr3_a_aa_1, cdr3_b_aa_1),
+            max_col = pmax(cdr3_a_aa_2, cdr3_b_aa_2)
+          ) %>% 
+          # Keep only the first occurrence of each pair
+          distinct(min_col, max_col, .keep_all = T) 
+    }
+    else
+    {
+      cdr<-paste0("cdr3_",substr(chains,1,1),"_aa")
+      df_net<-df_net[df_net[[paste0(cdr,"_1")]]!=df_net[[paste0(cdr,"_2")]],]
+      
+      if(chains=="alpha")
+        df_net<- df_net %>% mutate(
+          # Create temporary sorted columns to identify matching pairs
+          min_col = pmin(cdr3_a_aa_1, cdr3_a_aa_2),
+          max_col = pmax(cdr3_a_aa_2, cdr3_a_aa_1)
+        ) %>% 
+        # Keep only the first occurrence of each pair
+        distinct(min_col, max_col, .keep_all = T) %>%
+        # Remove the temporary columns
+        select(-min_col, -max_col) 
+      else{
+        df_net<- df_net %>% mutate(
+          # Create temporary sorted columns to identify matching pairs
+          min_col = pmin(cdr3_b_aa_1, cdr3_b_aa_2),
+          max_col = pmax(cdr3_b_aa_2, cdr3_b_aa_1)
+        ) %>% 
+        # Keep only the first occurrence of each pair
+        distinct(min_col, max_col, .keep_all = T) %>%
+        # Remove the temporary columns
+        select(-min_col, -max_col) 
+      }
+    }
+  }
+  write.table(df_net,file="network_edges.txt",sep="\t",row.names = F,quote=F)
   return(df_net)
+}
+
+
+#' R Function to generate motif enrichment
+#' @param tcr_data A data.frame containing your TCR sequence data
+#' @return A data.frame with the tcrdist3 results
+generate_tcrdist_motifs <- function(tr,tcr_df,chain,radius=50L) {
+  
+  
+  # Generate a sequence motif (logo) for a cluster -----------------
+  # palmotif builds a probability matrix + SVG logo from an alignment
+  # of CDR3 sequences within a neighborhood/cluster.
+  
+  cluster_idx <- neighbors[[1]] + 1  # back to 1-indexed for R
+  cluster_seqs <- tcr_df[[paste0("cdr3_",substr(chain,1,1),"_aa")]][cluster_idx]
+  
+  palmotif <- import("palmotif")
+  
+  # palmotif needs a DataFrame with sequences (and optionally counts/weights)
+  motif_input <- data.frame(seq = cluster_seqs, stringsAsFactors = FALSE)
+  py_motif_input <- r_to_py(motif_input)
+  motif_result <- palmotif$compute_pal_motif(
+    seqs = py_motif_input$seq$tolist(),
+    centroid = cluster_seqs[1]   # reference/anchor sequence for alignment
+  )
+  
+  # motif_result typically returns (motif_df, stats) — a matrix of
+  # position-specific amino acid probabilities plus an SVG logo string
+  motif_matrix <- motif_result[[1]]
+  svg_logo     <- motif_result[[2]]
+  print(svg_logo)
+  # ---- 6. Save the motif logo as an SVG file ------------------------------
+  writeLines(svg_logo, con = "cluster1_motif.svg")
+  
+  # ---- 7. Inspect the motif matrix in R -----------------------------------
+  motif_df_r <- py_to_r(motif_matrix)
+  
+  View(svg_logo)
 }
 
 message("Global file loaded!")

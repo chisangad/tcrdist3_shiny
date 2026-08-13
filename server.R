@@ -38,6 +38,7 @@ server <- function(input, output, session) {
     chains <- strsplit(input$chains, ",")[[1]]
     return(chains)
   })
+  
   # Run tcrdist3 analysis when the run button is clicked
   analysis_results <- eventReactive(input$run, {
     render_error_ui("", output = output) #Clear any error messages
@@ -99,7 +100,6 @@ server <- function(input, output, session) {
   observe({
     tr<-analysis_results()
     req(tr)
-    
     #Get epitopes
     epitopes <- unique(tcr_data()$epitope)
     #Get chains from the distance compute
@@ -173,6 +173,31 @@ server <- function(input, output, session) {
       )
     })
     
+    output$epitope_select_ui_motif<-renderUI({
+      tagList(
+        selectizeInput(
+          "epitope_sel_motif",
+          "Select up to 2 Epitopes:",
+          choices = epitopes,
+          multiple = T,
+          options = list(placeholder = "Select Epitope:")#, maxItems = 2)
+        )
+      )
+    })
+    #Load epitopes in trees tab
+    output$epitope_select_ui_trees <- renderUI({
+      tagList(
+        selectizeInput(
+          "epitope_sel_trees",
+          "Select Epitopes:",
+          selected= epitopes,
+          choices = epitopes,
+          multiple = T,
+          options = list(placeholder = "Select Epitope:")
+        )
+      )
+    })
+    
     output$epitope_select_hierarch_ui <- renderUI({
       tagList(
         selectizeInput(
@@ -191,55 +216,78 @@ server <- function(input, output, session) {
     #####################################################
     observe({
       tr<-analysis_results()
+      default_tcr_distance<-100
       req(tr)
       chains<-strsplit(input$chains,",")[[1]]
       if(length(chains)==2)
         pw_alpha_beta_max <- max(tr$pw_beta + tr$pw_alpha)
       else
         pw_alpha_beta_max<-max(tr[[paste0("pw_",chains)]])
-      net_data<-generate_network(tr,120)
+      net_data<-generate_network(tr,default_tcr_distance,F)
       output$networkcard<-renderUI({
         tagList(
+          hr(),
           card(
             layout_sidebar(
               sidebar = sidebar(
-                helpText("Filter edges by distance and choose how to color the nodes."),
+                h4("Network options"),
+                hr(),
+                helpText("Filter edges by radius, epitope, and choose how to color the nodes."),
+                hr(),
+                selectizeInput(
+                  "epitope_sel_network",
+                  "Select Epitopes:",
+                  selected= epitopes,
+                  choices = epitopes,
+                  multiple = T,
+                  options = list(placeholder = "Select Epitope:")
+                ),
+                selectizeInput(
+                  "chain_select_network",
+                  "Select chain(s):",
+                  choices = chains,
+                  selected= chains,
+                  multiple = TRUE,
+                  options=list(placeholder = "Select chain(s)")
+                ),
                 # Slider to filter maximum distance
                 sliderInput("max_dist", 
-                            "Maximum TCR Distance (Edge Threshold):", 
+                            "TCR distance:", 
                             min = 0, 
                             max = pw_alpha_beta_max,
-                            value = 120, 
+                            value = default_tcr_distance, 
                             step = 1),
                 # Dropdown to color nodes
                 selectInput("color_var", 
                             "Color Nodes By:", 
                             choices = c("Epitope" = "epitope", 
                                         "Subject" = "subject", 
-                                        "V Beta Gene" = "v_b_gene",
-                                        "V Alpha Gene" = "v_a_gene",
-                                        "CDR3 Alpha AA" = "cdr3_a_aa",
-                                        "CDR3 Beta AA" ="cdr3_b_aa")),
-                hr()
+                                        "V-alpha-gene" = "v_a_gene",
+                                        "V-beta-gene" = "v_b_gene",
+                                        "CDR3-alpha-aa" = "cdr3_a_aa",
+                                        "CDR3-beta-aa" ="cdr3_b_aa")),
+                hr(),
+                checkboxInput("check_net_selfloops","Remove CDR3 self-loops"),
+                hr(),
               ),
               card(
                 p(strong("Network Stats:")),
                 textOutput("node_count"),
                 textOutput("edge_count"),
                 hr(),
-                visNetworkOutput("network_plot", height = "750px")
+                withSpinner(visNetworkOutput("network_plot", height = "750px"),)
               ))
           ))
       })
     })
     
     # Render the network visualization
-    observeEvent(c(input$max_dist, input$color_var), {
+    observeEvent(c(input$max_dist, input$color_var,input$check_net_selfloops,input$epitope_sel_network,input$chain_select_network), {
       req(analysis_results())
       tryCatch({
         tr <- analysis_results()
-        chains <- strsplit(input$chains, ",")[[1]]
-        
+        chains <- input$chain_select_network
+        tr<-subset_tr_by_epitope(tr,epitope_name = input$epitope_sel_network,chain = chains)
         # Recompute network with current edge threshold
         if (length(chains) == 2) {
           pw_alpha_beta_max <- max(tr$pw_beta + tr$pw_alpha)
@@ -247,7 +295,8 @@ server <- function(input, output, session) {
           pw_alpha_beta_max <- max(tr[[paste0("pw_", chains)]])
         }
         
-        net_data <- generate_network(tr, input$max_dist)
+        
+        net_data <- generate_network(tr,input$max_dist,input$check_net_selfloops)
         
         if (nrow(net_data) == 0) {
           # No edges at this threshold
@@ -273,11 +322,13 @@ server <- function(input, output, session) {
           label = all_node_ids,
           title = paste0(
             "Clone ID: ", all_node_ids, "<br>",
-            "Epitope: ", clone_df[[color_var]][all_node_ids + 1],"<br>",
+            "Subject: ", clone_df$subject[all_node_ids + 1],"<br>",
+            "Epitope: ", clone_df$epitope[all_node_ids + 1],"<br>",
             "V-Alpha: ", clone_df$v_a_gene[all_node_ids + 1],"<br>",
             "V-Beta: ", clone_df$v_b_gene[all_node_ids + 1],"<br>",
             "CDR3-A: ", clone_df$cdr3_a_aa[all_node_ids + 1],"<br>",
-            "CDR3-B: ", clone_df$cdr3_b_aa[all_node_ids + 1]),
+            "CDR3-B: ", clone_df$cdr3_b_aa[all_node_ids + 1],"<br>",
+            "Col by: ",color_var),
           group = as.character(clone_df[[color_var]][all_node_ids + 1]),
           size = 20
         )
@@ -337,12 +388,26 @@ server <- function(input, output, session) {
         )
       )
     })
+    
+    #Load chains in motif selection
+    output$chain_select_ui_motif <- renderUI({
+      tagList(
+        selectizeInput(
+          "chain_select_motif",
+          "Select chain:",
+          choices = c("",chains_tr_only),
+          options=list( placeholder = "Select chain:")
+        )
+      )
+    })
+    
     output$chain_select_ui_trees <- renderUI({
       tagList(
         selectInput(
           "chain_select_tree",
-          "Select a chain:",
+          "Select chain(s):",
           selected = chains_tr_only[1],
+          multiple = T,
           choices = chains_tr_only
         )
       )
@@ -1171,7 +1236,7 @@ server <- function(input, output, session) {
         tagList(
           sliderInput(
             "dist_threshold",
-            "Max Distance to Show:",
+            "TCR distance:",
             min = floor(min(pw_matrix)),
             max = ceiling(max(pw_matrix)),
             value = ceiling(median(pw_matrix))
@@ -1303,59 +1368,50 @@ server <- function(input, output, session) {
     return("donotshow")
   })
   outputOptions(output, "showtrees", suspendWhenHidden = FALSE)
-  #Populate trees
+  
+  ##############################################################
+  #.          Tab used to generate trees                       #
+  ##############################################################
+  
   observeEvent(input$run_trees, {
     render_error_ui("", output = output) #Clear any error messages
-    req(tcr_data())
+    tcr_data<-tcr_data()
+    req(tcr_data)
     withProgress(message = 'Running trees...', value = 0, {
       tryCatch({
         #If more than one chain has been selected, then recompute distance matrix based on chain
-        chains <- strsplit(input$chains, ",")[[1]]
+        chain_trees <- input$chain_select_tree
         output$showtrees <- reactive({
           return("show")
         })
+        epitopes_trees<-input$epitope_sel_trees
+        if(length(chain_trees)==length(chains()) & length(unique(tcr_data()$epitope))==length(epitopes_trees))
+        {
+          message("Using already computed results")
+          tcr<-analysis_results()
+        }
+        else{
+          incProgress(0.1, detail = "Computing distance matrix..")
+          tcr <- get_epitope_dist_matrix(
+            tcr_data,
+            epitope_name = epitopes_trees,
+            organism = input$organism,
+            chains = chain_trees,
+            dbfile = input$dbfile
+          )  
+        }
         outputOptions(output, "showtrees", suspendWhenHidden = FALSE)
         output$tree_output_plot<-renderUI(NULL)
-        if(length(chains)>1)
-        {
-          pd <- import("pandas")
-          inspect <- import("inspect")
-          message("Finished importing pandas")
-          TCRrep <- import("tcrdist.repertoire")$TCRrep
-          
-          message("Finished importing TCRrep")
-          incProgress(0.3, detail = "Preparing data...")
-          
-          # Convert R data frame to pandas DataFrame
-          cell_df <- r_to_py(tcr_data())
-          # Get chains for analysis
-          py <- import_main()
-          
-          message(paste0(chains, collapse = ":"))
-          chains <- list(input$chain_select_tree)
-          message(chains)
-          incProgress(0.5, detail = "Computing distances...")
-          # Initialize TCRrep object and compute distances
-          tr <- TCRrep(
-            cell_df = cell_df,
-            organism = r_to_py(input$organism),
-            chains = r_to_py(chains),
-            db_file = r_to_py(input$dbfile)
-          )  
-        } else{
-          tr <- analysis_results()
-        }
-        req(tr)
-        incProgress(0.1, detail = "Importing required library...")
-        
+        incProgress(0.3, detail = "Importing required library...")
         TCRtree <- import("tcrdist.tree")
-        incProgress(0.3, detail = "Preparing data...")
+        incProgress(0.4, detail = "Preparing data...")
         file.name <- paste0(session$token, "_tree.html")
         temp.file <- tempfile()
         message("Temp file for trees: ", temp.file)
         remove_www_tempfiles(session, "tree.html")
         message("Running trees")
-        tcrtree = TCRtree$TCRtree(tcrrep = tr, html_name = temp.file)
+        tcrtree = TCRtree$TCRtree(tcrrep = tcr, html_name = temp.file)
+        View(tcrtree)
         incProgress(0.5, detail = "Building tree...")
         tcrtree$build_tree()
         incProgress(0.9, detail = "Finalizing...")
@@ -1433,4 +1489,253 @@ server <- function(input, output, session) {
       theme_minimal()
   })
   
+  
+  
+  ##############################################################################
+  #                     Motif Enrichment Tab                                   #
+  ##############################################################################
+  
+  
+  output$cluster_selector <- renderUI({
+    req(neighbors(), cluster_order())
+    ord   <- cluster_order()
+    sizes <- sapply(neighbors()[ord], length)
+    
+    choice_labels <- paste0("Cluster ", ord, " (n=", sizes, ")")
+    choices <- setNames(ord, choice_labels)
+    
+    selectInput("cluster_id", "Choose cluster (largest first)",
+                choices = choices)
+  })
+  motif_filtered_tcr<-reactive({
+    tr <- analysis_results()
+    req(tr)
+    chain_motif <- input$chain_select_motif
+    epitopes_motif <- input$epitope_sel_motif
+    tryCatch({
+      tr <- subset_tr_by_epitope(tr, epitopes_motif, chain_motif)
+      req(tr)
+      return(tr)
+    }, error = function(e) {
+      print(e$message)
+      showModal(modalDialog(
+        title = "Error",
+        message = paste("An error occurred:", e$message),
+        easyClose = TRUE
+      ))
+    })
+  })
+  
+  
+  motif_pwmat <- reactive({
+    chain_motif <- input$chain_select_motif
+    req(chain_motif)
+    tryCatch({
+      tr <- motif_filtered_tcr()
+      req(tr)
+      epitopes_motif <- input$epitope_sel_motif
+      message("Chain selected:", chain_motif)
+      # Get pairwise matrix
+      if (chain_motif == "alpha")
+        dist_mat <- tr$pw_alpha
+      else if (chain_motif == "beta")
+        dist_mat <- tr$pw_beta
+      else
+        dist_mat <- tr$pw_gamma
+      
+      output$motif_radius_ui<-renderUI({
+        sliderInput("motif_radius", 
+                    "TCR distance:", 
+                    min = 0, 
+                    max = max(dist_mat),
+                    value = 50L, 
+                    step = 1)
+      })
+      return(dist_mat)
+    }, error = function(e) {
+      print(e$message)
+      showModal(modalDialog(
+        title = "Error",
+        message = paste("An error occurred:", e$message),
+        easyClose = TRUE
+      ))
+    })
+  })
+  
+  neighbors<-reactive({
+    req(motif_pwmat())
+    dist_mat<-motif_pwmat()
+    radius<-input$motif_radius
+    # Find neighborhoods (clusters) around a radius ------------------
+    neighbors <- lapply(seq_len(nrow(dist_mat)) - 1, function(i) {
+      which(dist_mat[i + 1, ] <= radius) - 1  #zero-indexed for python-style logic
+    })
+    return(neighbors)
+  })
+  
+  # ---- Deduplicated neighbor list -----------------------------------
+  neighbors_dedup <- reactive({
+    req(neighbors())
+    nb <- neighbors()
+    # build a signature for each cluster: sorted, comma-joined member indices
+    # (two clusters are "the same" if they contain exactly the same members)
+    signatures <- sapply(nb, function(idx) paste(sort(idx), collapse = ","))
+    
+    # keep only the first occurrence of each unique signature
+    keep <- !duplicated(signatures)
+    kept_indices <- which(keep)
+    setNames(kept_indices, kept_indices)
+  })
+  
+  # ---- Cluster ordering: largest first, using deduplicated list -----
+  cluster_order <- reactive({
+    req(neighbors(), neighbors_dedup())
+    keep_idx <- neighbors_dedup()
+    sizes <- sapply(neighbors()[keep_idx], length)
+    keep_idx[order(sizes, decreasing = TRUE)]
+  })
+  
+  # cluster_order <- reactive({
+  #   req(neighbors())
+  #   sizes <- sapply(neighbors(), length)
+  #   # order of original cluster indices, largest cluster first
+  #   order(sizes, decreasing = TRUE)
+  # })
+  
+  observeEvent(c(input$chain_select_motif,input$epitope_sel_motif,input$motif_radius),{
+    # Code to run motif enrichment analysis
+    print("Running chain event")
+    req(input$chain_select_motif)
+    req(input$epitope_sel_motif)
+    tryCatch({
+      req(neighbors())
+      neighbors<-neighbors()
+      output$cluster_select_ui <- renderUI({
+        req(neighbors(), cluster_order())
+        ord   <- cluster_order()
+        sizes <- sapply(neighbors(), length)[ord]
+        
+        # named choices: label shows rank + size, value is the ORIGINAL cluster index
+        choice_labels <- paste0("Cluster ", ord, " (n=", sizes, ")")
+        choices <- setNames(ord, choice_labels)
+        
+        selectizeInput("cluster_id","Choose cluster (largest first)",
+                       choices = choices)
+      })
+      # output$cluster_select_ui <- renderUI({
+      #   selectizeInput("cluster_id", "Choose cluster (by seed index)",
+      #               choices = seq_along(neighbors))
+      # })
+      
+    }, error = function(e) {
+      showModal(modalDialog(
+        title = "Error",
+        paste("An error occurred:", e$message),
+        easyClose = TRUE
+      ))
+    })
+    })
+  
+  # ---- Subset of the original data belonging to the selected cluster ----
+  cluster_data <- reactive({
+    req(neighbors(),motif_filtered_tcr(), input$cluster_id)
+    idx <- neighbors()[[as.integer(input$cluster_id)]]
+    motif_filtered_tcr()$clone_df[idx, , drop = FALSE]
+  })
+  
+ observeEvent(c(input$run_motifs,input$cluster_id), {
+      req(neighbors(), tcr_data())
+      idx <- neighbors()[[as.integer(input$cluster_id)]]
+      print(idx)
+      palmotif <- import("palmotif")
+      chain_motif <- input$chain_select_motif
+      cdr3<-paste0("cdr3_",substr(chain_motif,1,1),"_aa")
+      cluster_seqs <- tcr_data()[[cdr3]][idx]
+      if (length(cluster_seqs) < 2) return(NULL)
+      # palmotif needs a DataFrame with sequences (and optionally counts/weights)
+      motif_input <- data.frame(seq = cluster_seqs, stringsAsFactors = FALSE)
+      py_motif_input <- r_to_py(motif_input)
+      motif_result <- palmotif$compute_pal_motif(
+        seqs = py_motif_input$seq$tolist(),
+        centroid = cluster_seqs[1]   # reference/anchor sequence for alignment
+      )
+
+    # ---- Render the SVG logo directly in the app -----------------
+  prob_matrix<-py_to_r(motif_result[[1]]) %>% as.matrix() %>% t()
+  output$motif_plot<-renderPlot({
+      ggseqlogo(prob_matrix, method = "bits", seq_type = "aa") +
+        ggtitle(paste0(cdr3," Motif")) 
+  })
+  
+  
+    # output$motif_svg <- renderUI({
+    #   req(motif_result)
+    #   svg_string <- palmotif$svg_logo(motif_result, return_str = TRUE) #SVG text returned by palmotif
+    #   tagList(
+    #     tags$div(
+    #       style = "border:1px solid #ddd; padding:10px; background:white;",
+    #       HTML(svg_string)
+    #     )
+    #   )
+    # })
+    
+    output$motif_table <- renderTable({
+      req(motif_result)
+      py_to_r(motif_result[[1]])
+    })
+  })
+ 
+ 
+ # ---- Motif Sidebar quick summary --------------------------------------
+ output$cluster_summary <- renderUI({
+   req(cluster_data())
+   cd <- cluster_data()
+   n_seqs   <- nrow(cd)
+   chain_motif <- input$chain_select_motif
+   cdr3<-paste0("cdr3_",substr(chain_motif,1,1),"_aa")
+   n_unique <- length(unique(cd[[cdr3]]))
+   total_ct <- if ("count" %in% names(cd)) sum(cd$count, na.rm = TRUE) else NA
+   
+   tagList(
+     h5("Cluster summary"),
+     p(strong("Sequences in cluster: "), n_seqs),
+     p(strong("Unique CDR3s: "), n_unique),
+     if (!is.na(total_ct)) p(strong("Total clone count: "), total_ct),
+     p(strong("Dominant V gene: "),
+       names(sort(table(cd$v_b_gene), decreasing = TRUE))[1]),
+     p(strong("Dominant J gene: "),
+       names(sort(table(cd$j_b_gene), decreasing = TRUE))[1])
+   )
+ })
+ 
+ # ---- Cluster Details sub-tab -----------------------------------------
+ output$cluster_seq_table <- renderDT({
+   req(cluster_data())
+   datatable(cluster_data(), options = list(pageLength = 10), rownames = FALSE)
+ })
+ 
+ output$v_gene_plot <- renderPlot({
+   req(cluster_data())
+   cd <- cluster_data()
+   chain_motif <- input$chain_select_motif
+   vgene<-paste0("v_",substr(chain_motif,1,1),"_gene")
+   barplot(
+     table(cd[[vgene]]),
+     las = 2, col = "steelblue",
+     main = NULL, ylab = "Count"
+   )
+ })
+ 
+ output$j_gene_plot <- renderPlot({
+   req(cluster_data())
+   cd <- cluster_data()
+   chain_motif <- input$chain_select_motif
+   jgene<-paste0("j_",substr(chain_motif,1,1),"_gene")
+   barplot(
+     table(cd[[jgene]]),
+     las = 2, col = "darkorange",
+     main = NULL, ylab = "Count"
+   )
+ })
+ 
 }
