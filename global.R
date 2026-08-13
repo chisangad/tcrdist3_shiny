@@ -270,7 +270,6 @@ subset_tr_by_epitope <- function(tr, epitope_name = NULL,chain=NULL) {
     mat <- tr[[pw]]
     result[[pw]] <- mat[idx, idx, drop = FALSE]
   }
-  write.table(data.frame(Names=names(tr)),file="Columns.txt")
   chains.keep<-tr[["chains"]]
   if(!is.null(chain))
   {
@@ -572,7 +571,6 @@ generate_network <- function(tr, edge_threshold, removeselfloops) {
       }
     }
   }
-  write.table(df_net,file="network_edges.txt",sep="\t",row.names = F,quote=F)
   return(df_net)
 }
 
