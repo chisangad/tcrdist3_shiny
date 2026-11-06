@@ -123,7 +123,6 @@ ui <- page_sidebar(
       tabPanel("TCR Distance",
                hr(),
                conditionalPanel(condition = "output.csvtest", 
-               tabsetPanel(
                  card(tabsetPanel(
                    tabPanel(
                      "Heatmap",
@@ -202,7 +201,7 @@ ui <- page_sidebar(
                      downloadButton("download_data", "Download Clone Matrix")
                    )
                  ))
-               ))),
+               )),
       ###########################################################
       #                        Gene Level Analysis              #
       ###########################################################

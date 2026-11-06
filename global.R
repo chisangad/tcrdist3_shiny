@@ -8,19 +8,60 @@
 # - Python/reticulate: reticulate
 # - Other: visNetwork, openxlsx
 
-path2conda <- normalizePath("~/miniconda3/envs/tcrdist3_env/bin/python", mustWork = FALSE)
-if (Sys.getenv("RETICULATE_PYTHON") == "" && file.exists(path2conda)) {
-  Sys.setenv(RETICULATE_PYTHON = path2conda)
+# --- 1. Load reticulate and initialize Conda Python FIRST ---
+# Initializing Conda Python before loading other R packages (such as plotly/data.table/kernlab)
+# and setting KMP_DUPLICATE_LIB_OK=TRUE prevents shared library / OpenMP (libomp.dylib)
+# conflicts and segfaults on macOS.
+Sys.setenv(KMP_DUPLICATE_LIB_OK = "TRUE")
+
+if (!require("reticulate", quietly = TRUE)) {
+  install.packages("reticulate", dependencies = TRUE)
+  library(reticulate)
 }
 
+env_name <- "tcrdist3_env"
+message("Check if Conda environment exists")
+setup_conda_environment <- function(env_name = "tcrdist3_env") {
+  tryCatch({
+    # Only call use_condaenv if RETICULATE_PYTHON is not already explicitly pointing elsewhere
+    if (Sys.getenv("RETICULATE_PYTHON") == "") {
+      if (!reticulate::condaenv_exists(env_name)) {
+        message(paste0("Conda environment '", env_name, "' not found. Creating..."))
+        
+        reticulate::conda_create(
+          envname = env_name,
+          packages = "python=3.8",
+          channel = c("conda-forge", "bioconda", "defaults")
+        )
+        
+        message(paste0("Installing tcrdist3 in '", env_name, "'..."))
+        reticulate::conda_install(env_name, packages = "tcrdist3", pip = TRUE)
+      }
+      reticulate::use_condaenv(env_name, required = TRUE)
+    }
+    message(paste0("Conda environment '", env_name, "' ready."))
+  }, error = function(e) {
+    stop(paste0("Failed to setup conda environment: ", conditionMessage(e)))
+  })
+}
+
+# Initialize conda environment and bind Python before loading other R packages
+setup_conda_environment(env_name)
+py_run_string("
+def process_list(my_list):
+        return my_list
+")
+message("Conda environment loaded")
+
+# --- 2. Load remaining required R packages ---
 message("Checking if packages exist, install and load")
 packages <- list(
   # Core dependencies
-  core = c("reticulate", "shiny", "shinyjs", "shinyalert", "bslib", "shinycssloaders","shinylogs","ggseqlogo"),
+  core = c("shiny", "shinyjs", "shinyalert", "bslib", "shinycssloaders", "shinylogs", "ggseqlogo"),
   # Data wrangling & visualization
   data = c("tidyverse", "plotly", "DT"),
   # Heatmap & kernel methods
-  heatmap = c("ComplexHeatmap", "kernlab","InteractiveComplexHeatmap"),
+  heatmap = c("ComplexHeatmap", "kernlab", "InteractiveComplexHeatmap"),
   # Network visualization
   network = c("visNetwork"),
   # Utilities
@@ -32,7 +73,7 @@ all_packages <- unlist(packages)
 for (pkg in all_packages) {
   if (!require(pkg, character.only = TRUE, quietly = TRUE)) {
     # Special handling for BioConductor packages
-    if (pkg %in% c("InteractiveComplexHeatmap","ComplexHeatmap")) {
+    if (pkg %in% c("InteractiveComplexHeatmap", "ComplexHeatmap")) {
       message(paste0("Installing ", pkg, " from BioConductor..."))
       if (!require("BiocManager", quietly = TRUE)) {
         install.packages("BiocManager")
@@ -46,40 +87,6 @@ for (pkg in all_packages) {
 }
 
 message("Packages loaded!")
-
-# --- Python Environment Setup ---
-env_name <- "tcrdist3_env"
-message("Check if Conda environment exists")
-setup_conda_environment <- function(env_name = "tcrdist3_env") {
-  tryCatch({
-    if (!reticulate::condaenv_exists(env_name)) {
-      message(paste0("Conda environment '", env_name, "' not found. Creating..."))
-      
-      reticulate::conda_create(
-        envname = env_name,
-        packages = "python=3.8",
-        channel = c("conda-forge", "bioconda", "defaults")
-      )
-      
-      message(paste0("Installing tcrdist3 in '", env_name, "'..."))
-      reticulate::conda_install(env_name, packages = "tcrdist3", pip = TRUE)
-    }
-    
-    reticulate::use_condaenv(env_name, required = TRUE)
-    message(paste0("Conda environment '", env_name, "' ready."))
-  }, error = function(e) {
-    stop(paste0("Failed to setup conda environment: ", conditionMessage(e)))
-  })
-}
-
-# Initialize conda environment before executing any Python code
-setup_conda_environment(env_name)
-message("Conda environment loaded")
-
-py_run_string("
-def process_list(my_list):
-        return my_list
-")
 
 #' Generate kPCA Plot from tcrdist3 data
 #'
