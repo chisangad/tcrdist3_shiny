@@ -6,8 +6,11 @@ LABEL maintainer="David Chisanga"
 # Installing the R packages needed
 # 'shiny' and its dependencies are already in the base image.
 # We use a single RUN command for efficiency.
-RUN R -e "install.packages(c('reticulate', 'pheatmap', 'DT'), \
-    repos = 'https://cloud.r-project.org/')"
+RUN R -e "install.packages(c('BiocManager', 'reticulate', 'pheatmap', 'DT', \
+    'shinyjs', 'shinyalert', 'bslib', 'shinycssloaders', 'shinylogs', \
+    'ggseqlogo', 'plotly', 'kernlab', 'visNetwork', 'openxlsx'), \
+    repos = 'https://cloud.r-project.org/') && \
+    BiocManager::install(c('ComplexHeatmap', 'InteractiveComplexHeatmap'), ask = FALSE, update = FALSE)"
 
 ## -------------------------
 ## Miniconda Installation
@@ -48,10 +51,9 @@ RUN conda create -n ${CONDA_ENV} python=3.8 -c conda-forge -c bioconda -c defaul
 # to call use_condaenv() in your R scripts.
 ENV RETICULATE_PYTHON="/opt/miniconda/envs/${CONDA_ENV}/bin/python"
 
-RUN mkdir /root/tcrdist3_shiny 
-RUN mkdir /root/results
+RUN mkdir -p /root/tcrdist3_shiny/www /root/tcrdist3_shiny/logs /root/results
 
-COPY R /root/tcrdist3_shiny
+COPY global.R ui.R server.R checkConda.R /root/tcrdist3_shiny/
 
 EXPOSE 3838
-CMD ["R", "-e", "shiny::runApp('/root/tcrdist3_shiny',host = '0.0.0.0', port=3838)"]
+CMD ["R", "-e", "shiny::runApp('/root/tcrdist3_shiny', host = '0.0.0.0', port = 3838)"]

@@ -13,15 +13,16 @@ check_and_install_miniconda <- function() {
       installer_name <- "Miniconda_installer.exe"
       miniconda_path <- file.path(Sys.getenv("LOCALAPPDATA"), "Continuum", "miniconda3")
     } else if (Sys.info()["sysname"] == "Darwin") {
-      # macOS
-      installer_url <- "https://repo.anaconda.com/miniconda/Miniconda3-latest-MacOSX-x86_64.sh"
+      # macOS (detect Apple Silicon arm64 vs Intel x86_64)
+      arch <- ifelse(Sys.info()["machine"] == "arm64", "arm64", "x86_64")
+      installer_url <- paste0("https://repo.anaconda.com/miniconda/Miniconda3-latest-MacOSX-", arch, ".sh")
       installer_name <- "Miniconda_installer.sh"
-      miniconda_path <- file.path("~", "miniconda3")
+      miniconda_path <- path.expand("~/miniconda3")
     } else {
       # Linux
       installer_url <- "https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh"
       installer_name <- "Miniconda_installer.sh"
-      miniconda_path <- file.path("~", "miniconda3")
+      miniconda_path <- path.expand("~/miniconda3")
     }
     
     # Download the installer

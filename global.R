@@ -8,8 +8,10 @@
 # - Python/reticulate: reticulate
 # - Other: visNetwork, openxlsx
 
-path2conda=normalizePath("~/miniconda3/envs/tcrdist3_env/bin/python")
-Sys.setenv(RETICULATE_PYTHON = path2conda)
+path2conda <- normalizePath("~/miniconda3/envs/tcrdist3_env/bin/python", mustWork = FALSE)
+if (Sys.getenv("RETICULATE_PYTHON") == "" && file.exists(path2conda)) {
+  Sys.setenv(RETICULATE_PYTHON = path2conda)
+}
 
 message("Checking if packages exist, install and load")
 packages <- list(
@@ -45,11 +47,6 @@ for (pkg in all_packages) {
 
 message("Packages loaded!")
 
-py_run_string("
-def process_list(my_list):
-        return my_list
-")
-
 # --- Python Environment Setup ---
 env_name <- "tcrdist3_env"
 message("Check if Conda environment exists")
@@ -68,16 +65,21 @@ setup_conda_environment <- function(env_name = "tcrdist3_env") {
       reticulate::conda_install(env_name, packages = "tcrdist3", pip = TRUE)
     }
     
-    reticulate::use_condaenv(env_name)
+    reticulate::use_condaenv(env_name, required = TRUE)
     message(paste0("Conda environment '", env_name, "' ready."))
   }, error = function(e) {
     stop(paste0("Failed to setup conda environment: ", conditionMessage(e)))
   })
 }
 
-# Initialize conda environment
+# Initialize conda environment before executing any Python code
 setup_conda_environment(env_name)
 message("Conda environment loaded")
+
+py_run_string("
+def process_list(my_list):
+        return my_list
+")
 
 #' Generate kPCA Plot from tcrdist3 data
 #'
@@ -98,15 +100,21 @@ generate_kpca_plot <- function(dist_matrix,
                                features = 2,
                                enable.facet = TRUE,
                                cols.to.use = c("v_a_gene", "v_b_gene", "j_a_gene", "j_b_gene")) {
-  # Validate inputs
-  if (!color_by %in% colnames(meta_df)) {
-    stop(paste0("Column '", color_by, "' not found in meta_df"))
+  # Validate inputs when single-variable coloring is used
+  if (!enable.facet) {
+    if (is.null(color_by) || length(color_by) == 0 || !color_by %in% colnames(meta_df)) {
+      stop(paste0("Column '", color_by, "' not found in meta_df"))
+    }
   }
   
   # 1. Convert distances to a Gram Matrix (Similarity Matrix)
   # gram = 1 - (D / Dmax); high similarity -> values near 1, high distance -> values near 0
-  d_max <- max(dist_matrix)
-  gram_matrix <- 1 - (dist_matrix / d_max)
+  d_max <- max(dist_matrix, na.rm = TRUE)
+  if (d_max == 0) {
+    gram_matrix <- matrix(1, nrow = nrow(dist_matrix), ncol = ncol(dist_matrix))
+  } else {
+    gram_matrix <- 1 - (dist_matrix / d_max)
+  }
   
   # 2. Perform Kernel PCA using precomputed Gram matrix
   kpca_res <- kernlab::kpca(kernlab::as.kernelMatrix(as.matrix(gram_matrix)), features = features)
@@ -153,8 +161,13 @@ generate_kpca_plot <- function(dist_matrix,
   }
   else
   {
+    # Only use gene columns actually present in meta_df (handles single-chain / gamma-delta)
+    cols.to.use <- intersect(cols.to.use, colnames(meta_df))
+    if (length(cols.to.use) == 0) {
+      cols.to.use <- grep("gene", colnames(meta_df), value = TRUE)
+    }
     # 3. Prepare plotting data with facet variable
-    plot_data <- cbind(data.frame(PC1 = rotated(kpca_res)[, 1], PC2 = rotated(kpca_res)[, 2]), meta_df[, cols.to.use]) %>% 
+    plot_data <- cbind(data.frame(PC1 = rotated(kpca_res)[, 1], PC2 = rotated(kpca_res)[, 2]), meta_df[, cols.to.use, drop = FALSE]) %>% 
       pivot_longer(
         cols = all_of(cols.to.use),
         names_to = "facet_var",
@@ -181,7 +194,7 @@ generate_kpca_plot <- function(dist_matrix,
       ) +
       ggplot2::labs(
         title = title,
-        subtitle = paste("Colored and Faceted by:", color_by),
+        subtitle = paste("Colored and Faceted by:", paste(cols.to.use, collapse = ", ")),
         x = "kPC1 (Kernel PC 1)",
         y = "kPC2 (Kernel PC 2)"
       ) +
@@ -257,25 +270,26 @@ get_epitope_dist_matrix <- function(df,
 #'   of a TCRrep object that the rest of the app relies on, so it can be
 #'   used as a drop-in replacement wherever `tr$clone_df` / `tr[[pw_name]]`
 #'   are accessed.
-subset_tr_by_epitope <- function(tr, epitope_name = NULL,chain=NULL) {
+subset_tr_by_epitope <- function(tr, epitope_name = NULL, chain = NULL) {
   clone_df <- as.data.frame(tr$clone_df)
   if (!is.null(epitope_name)) {
     idx <- which(clone_df$epitope %in% epitope_name)
   } else {
     idx <- seq_len(nrow(clone_df))
   }
-  result <- list(clone_df = clone_df[idx, , drop = FALSE])
+  sub_clone_df <- clone_df[idx, , drop = FALSE]
+  rownames(sub_clone_df) <- NULL
+  result <- list(clone_df = sub_clone_df)
   pw_names <- names(tr)[grepl("^pw_", names(tr))]
   for (pw in pw_names) {
     mat <- tr[[pw]]
     result[[pw]] <- mat[idx, idx, drop = FALSE]
   }
-  chains.keep<-tr[["chains"]]
-  if(!is.null(chain))
-  {
-    chains.keep<-list(chains.keep[chains.keep %in% chain])  
+  chains.keep <- unlist(tr[["chains"]])
+  if (!is.null(chain) && any(nzchar(chain))) {
+    chains.keep <- chains.keep[chains.keep %in% chain]
   }
-  result[["chains"]]<-chains.keep
+  result[["chains"]] <- list(chains.keep)
   return(result)
 }
 
@@ -451,26 +465,33 @@ generate_clustered_heatmap<-function(tr)
 #'
 generate_network <- function(tr, edge_threshold, removeselfloops) {
   clone_df <- as.data.frame(tr$clone_df)
-  # Sum alpha and beta pairwise distance matrices to get combined distance
-  # (this allows measuring TCR similarity accounting for both chains)
-  chains<-tr[["chains"]][[1]]
-  print(chains)
-  pw_alpha_beta<-NULL
-  for(i in chains)
-  {
-    if(is.null(pw_alpha_beta))
-      pw_alpha_beta<-tr[[paste0("pw_",i)]]
-    else
-      pw_alpha_beta <- pw_alpha_beta+tr[[paste0("pw_",i)]]
+  # Sum active chain pairwise distance matrices to get combined distance
+  # (this allows measuring TCR similarity accounting for selected chains)
+  chains <- unlist(tr[["chains"]])
+  pw_alpha_beta <- NULL
+  for (i in chains) {
+    pw_mat <- tr[[paste0("pw_", i)]]
+    if (!is.null(pw_mat)) {
+      if (is.null(pw_alpha_beta))
+        pw_alpha_beta <- pw_mat
+      else
+        pw_alpha_beta <- pw_alpha_beta + pw_mat
+    }
   }
-    
+  if (is.null(pw_alpha_beta)) {
+    return(data.frame())
+  }
   
   # Find all pairs of clones with combined distance <= threshold
-  # (excluding self-edges via row(...) != col(...))
+  # (excluding self-edges via row(...) < col(...) so each undirected pair appears once)
   edges <- which(
-    pw_alpha_beta <= edge_threshold & row(pw_alpha_beta) != col(pw_alpha_beta),
+    pw_alpha_beta <= edge_threshold & row(pw_alpha_beta) < col(pw_alpha_beta),
     arr.ind = TRUE
   )
+  
+  if (nrow(edges) == 0) {
+    return(data.frame())
+  }
   
   # Extract 1-indexed row/col positions (R uses 1-indexing)
   node_1_idx <- edges[, "row"]
@@ -480,94 +501,44 @@ generate_network <- function(tr, edge_threshold, removeselfloops) {
   # (counting edges <= threshold, minus 1 for the self-loop)
   k_neighbors <- rowSums(pw_alpha_beta <= edge_threshold) - 1
   
+  # Helper to safely pull optional chain columns (e.g. when single-chain is analyzed)
+  get_col <- function(col_name, idx) {
+    if (col_name %in% colnames(clone_df)) clone_df[[col_name]][idx] else rep(NA_character_, length(idx))
+  }
+  
   # Build edge list as a data.frame
   # Note: Indices are converted to 0-indexed (node - 1) for consistency with Python/Cytoscape
   df_net <- data.frame(
     node_1      = node_1_idx - 1,                      # 0-indexed
     node_2      = node_2_idx - 1,                      # 0-indexed
     dist        = pw_alpha_beta[edges],
-    v_a_gene_1  = clone_df$v_a_gene[node_1_idx],
-    v_a_gene_2  = clone_df$v_a_gene[node_2_idx],
-    v_b_gene_1  = clone_df$v_b_gene[node_1_idx],
-    v_b_gene_2  = clone_df$v_b_gene[node_2_idx],
-    cdr3_b_aa_1 = clone_df$cdr3_b_aa[node_1_idx],
-    cdr3_b_aa_2 = clone_df$cdr3_b_aa[node_2_idx],
-    cdr3_a_aa_1 = clone_df$cdr3_a_aa[node_1_idx],
-    cdr3_a_aa_2 = clone_df$cdr3_a_aa[node_2_idx],
-    subject_1   = clone_df$subject[node_1_idx],
-    subject_2   = clone_df$subject[node_2_idx],
-    epitope_1   = clone_df$epitope[node_1_idx],
-    epitope_2   = clone_df$epitope[node_2_idx],
-    K_neighbors = k_neighbors[node_1_idx]
-  ) %>% mutate(
-    # Create temporary sorted columns to identify matching pairs
-    min_col = pmin(node_1, node_2),
-    max_col = pmax(node_1, node_2)
-  ) %>% 
-    # Keep only the first occurrence of each pair
-    distinct(min_col, max_col, .keep_all = T) %>%
-    # Remove the temporary columns
-    select(-min_col, -max_col)
+    v_a_gene_1  = get_col("v_a_gene", node_1_idx),
+    v_a_gene_2  = get_col("v_a_gene", node_2_idx),
+    v_b_gene_1  = get_col("v_b_gene", node_1_idx),
+    v_b_gene_2  = get_col("v_b_gene", node_2_idx),
+    cdr3_b_aa_1 = get_col("cdr3_b_aa", node_1_idx),
+    cdr3_b_aa_2 = get_col("cdr3_b_aa", node_2_idx),
+    cdr3_a_aa_1 = get_col("cdr3_a_aa", node_1_idx),
+    cdr3_a_aa_2 = get_col("cdr3_a_aa", node_2_idx),
+    subject_1   = get_col("subject", node_1_idx),
+    subject_2   = get_col("subject", node_2_idx),
+    epitope_1   = get_col("epitope", node_1_idx),
+    epitope_2   = get_col("epitope", node_2_idx),
+    K_neighbors = k_neighbors[node_1_idx],
+    stringsAsFactors = FALSE
+  )
   
-  #find self loops
-  if(removeselfloops)
-  {
-    #match all self loops and remove them from the rest of the analysis
-    if(length(chains)>1){
-        df_net<-df_net[df_net$cdr3_b_aa_1!=df_net$cdr3_b_aa_2&df_net$cdr3_a_aa_1!=df_net$cdr3_a_aa_2,]
-        
-        df_net<- df_net %>% mutate(
-          # Create temporary sorted columns to identify matching pairs
-          min_col = pmin(cdr3_a_aa_1, cdr3_a_aa_2),
-          max_col = pmax(cdr3_a_aa_2, cdr3_a_aa_1)
-        ) %>% 
-          # Keep only the first occurrence of each pair
-          distinct(min_col, max_col, .keep_all = T) %>%
-          # Remove the temporary columns
-          select(-min_col, -max_col) %>%
-          mutate(
-            # Create temporary sorted columns to identify matching pairs
-            min_col = pmin(cdr3_b_aa_1, cdr3_b_aa_2),
-            max_col = pmax(cdr3_b_aa_2, cdr3_b_aa_1)
-          ) %>% 
-          # Keep only the first occurrence of each pair
-          distinct(min_col, max_col, .keep_all = T) %>%
-          # Remove the temporary columns
-          select(-min_col, -max_col) %>%
-          filter(!(cdr3_a_aa_1 == cdr3_a_aa_2 & cdr3_b_aa_1 == cdr3_b_aa_2)) %>%
-          mutate(
-            # Create temporary sorted columns to identify matching pairs
-            min_col = pmin(cdr3_a_aa_1, cdr3_b_aa_1),
-            max_col = pmax(cdr3_a_aa_2, cdr3_b_aa_2)
-          ) %>% 
-          # Keep only the first occurrence of each pair
-          distinct(min_col, max_col, .keep_all = T) 
-    }
-    else
-    {
-      cdr<-paste0("cdr3_",substr(chains,1,1),"_aa")
-      df_net<-df_net[df_net[[paste0(cdr,"_1")]]!=df_net[[paste0(cdr,"_2")]],]
-      
-      if(chains=="alpha")
-        df_net<- df_net %>% mutate(
-          # Create temporary sorted columns to identify matching pairs
-          min_col = pmin(cdr3_a_aa_1, cdr3_a_aa_2),
-          max_col = pmax(cdr3_a_aa_2, cdr3_a_aa_1)
-        ) %>% 
-        # Keep only the first occurrence of each pair
-        distinct(min_col, max_col, .keep_all = T) %>%
-        # Remove the temporary columns
-        select(-min_col, -max_col) 
-      else{
-        df_net<- df_net %>% mutate(
-          # Create temporary sorted columns to identify matching pairs
-          min_col = pmin(cdr3_b_aa_1, cdr3_b_aa_2),
-          max_col = pmax(cdr3_b_aa_2, cdr3_b_aa_1)
-        ) %>% 
-        # Keep only the first occurrence of each pair
-        distinct(min_col, max_col, .keep_all = T) %>%
-        # Remove the temporary columns
-        select(-min_col, -max_col) 
+  # Find and remove CDR3 self loops if requested
+  if (isTRUE(removeselfloops) && nrow(df_net) > 0) {
+    if (length(chains) > 1 && all(c("alpha", "beta") %in% chains)) {
+      df_net <- df_net %>%
+        filter(!(cdr3_a_aa_1 == cdr3_a_aa_2 & cdr3_b_aa_1 == cdr3_b_aa_2))
+    } else {
+      cdr <- paste0("cdr3_", substr(chains[1], 1, 1), "_aa")
+      col1 <- paste0(cdr, "_1")
+      col2 <- paste0(cdr, "_2")
+      if (all(c(col1, col2) %in% colnames(df_net))) {
+        df_net <- df_net[df_net[[col1]] != df_net[[col2]], , drop = FALSE]
       }
     }
   }
@@ -578,15 +549,13 @@ generate_network <- function(tr, edge_threshold, removeselfloops) {
 #' R Function to generate motif enrichment
 #' @param tcr_data A data.frame containing your TCR sequence data
 #' @return A data.frame with the tcrdist3 results
-generate_tcrdist_motifs <- function(tr,tcr_df,chain,radius=50L) {
-  
-  
+generate_tcrdist_motifs <- function(tr, tcr_df, chain, neighbors, radius = 50L) {
   # Generate a sequence motif (logo) for a cluster -----------------
   # palmotif builds a probability matrix + SVG logo from an alignment
   # of CDR3 sequences within a neighborhood/cluster.
   
-  cluster_idx <- neighbors[[1]] + 1  # back to 1-indexed for R
-  cluster_seqs <- tcr_df[[paste0("cdr3_",substr(chain,1,1),"_aa")]][cluster_idx]
+  cluster_idx <- neighbors[[1]]
+  cluster_seqs <- tcr_df[[paste0("cdr3_", substr(chain, 1, 1), "_aa")]][cluster_idx]
   
   palmotif <- import("palmotif")
   
@@ -602,14 +571,10 @@ generate_tcrdist_motifs <- function(tr,tcr_df,chain,radius=50L) {
   # position-specific amino acid probabilities plus an SVG logo string
   motif_matrix <- motif_result[[1]]
   svg_logo     <- motif_result[[2]]
-  print(svg_logo)
-  # ---- 6. Save the motif logo as an SVG file ------------------------------
-  writeLines(svg_logo, con = "cluster1_motif.svg")
   
   # ---- 7. Inspect the motif matrix in R -----------------------------------
   motif_df_r <- py_to_r(motif_matrix)
-  
-  View(svg_logo)
+  return(list(motif_df = motif_df_r, svg_logo = svg_logo))
 }
 
 message("Global file loaded!")

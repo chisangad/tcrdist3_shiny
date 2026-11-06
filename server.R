@@ -2,10 +2,14 @@
 # This is a Shiny web application. You can run the application by clicking
 # the 'Run App' button above.
 #
-source("global.R")
+if (!exists("setup_conda_environment")) {
+  source("global.R")
+}
 # A reusable function to render a styled error message
 # --- Server Logic ---
 server <- function(input, output, session) {
+  dir.create("logs", showWarnings = FALSE, recursive = TRUE)
+  dir.create("www", showWarnings = FALSE, recursive = TRUE)
   track_usage(
     storage_mode = store_json(path = "logs/")
   )
@@ -14,7 +18,6 @@ server <- function(input, output, session) {
   hierarch_tabs_check <- reactiveVal(FALSE)
   conda_path <- Sys.which("python")
   render_error_ui("", output = output)
-  render_error_ui(conda_path, output = output)
   
   output$csvtest <- reactive({
     !is.null(input$file1)
@@ -30,7 +33,11 @@ server <- function(input, output, session) {
     req(input$file1)
     # Determine separator based on file extension
     sep <- ifelse(tools::file_ext(input$file1$name) == "tsv", "\t", ",")
-    read.csv(input$file1$datapath, sep = sep)
+    df <- read.csv(input$file1$datapath, sep = sep)
+    if (!"count" %in% colnames(df)) {
+      df$count <- 1L
+    }
+    df
   })
   
   chains<-reactive({
@@ -49,6 +56,7 @@ server <- function(input, output, session) {
       shinyalert(title = "Missing columns",
                  text = "Column names: 'epitope' or 'subject' missing in input data",
                  type = "error")
+      return(NULL)
     }
     
     hierarch_tabs_check(FALSE)
@@ -214,165 +222,75 @@ server <- function(input, output, session) {
     #####################################################
     #Load network graph after computing distance matrix #
     #####################################################
-    observe({
-      tr<-analysis_results()
-      default_tcr_distance<-100
-      req(tr)
-      chains<-strsplit(input$chains,",")[[1]]
-      if(length(chains)==2)
-        pw_alpha_beta_max <- max(tr$pw_beta + tr$pw_alpha)
-      else
-        pw_alpha_beta_max<-max(tr[[paste0("pw_",chains)]])
-      net_data<-generate_network(tr,default_tcr_distance,F)
-      output$networkcard<-renderUI({
-        tagList(
-          hr(),
-          card(
-            layout_sidebar(
-              sidebar = sidebar(
-                h4("Network options"),
-                hr(),
-                helpText("Filter edges by radius, epitope, and choose how to color the nodes."),
-                hr(),
-                selectizeInput(
-                  "epitope_sel_network",
-                  "Select Epitopes:",
-                  selected= epitopes,
-                  choices = epitopes,
-                  multiple = T,
-                  options = list(placeholder = "Select Epitope:")
-                ),
-                selectizeInput(
-                  "chain_select_network",
-                  "Select chain(s):",
-                  choices = chains,
-                  selected= chains,
-                  multiple = TRUE,
-                  options=list(placeholder = "Select chain(s)")
-                ),
-                # Slider to filter maximum distance
-                sliderInput("max_dist", 
-                            "TCR distance:", 
-                            min = 0, 
-                            max = pw_alpha_beta_max,
-                            value = default_tcr_distance, 
-                            step = 1),
-                # Dropdown to color nodes
-                selectInput("color_var", 
-                            "Color Nodes By:", 
-                            choices = c("Epitope" = "epitope", 
-                                        "Subject" = "subject", 
-                                        "V-alpha-gene" = "v_a_gene",
-                                        "V-beta-gene" = "v_b_gene",
-                                        "CDR3-alpha-aa" = "cdr3_a_aa",
-                                        "CDR3-beta-aa" ="cdr3_b_aa")),
-                hr(),
-                checkboxInput("check_net_selfloops","Remove CDR3 self-loops"),
-                hr(),
-              ),
-              card(
-                p(strong("Network Stats:")),
-                textOutput("node_count"),
-                textOutput("edge_count"),
-                hr(),
-                withSpinner(visNetworkOutput("network_plot", height = "750px"),)
-              ))
-          ))
-      })
-    })
+    default_tcr_distance <- 100
+    chains_net <- strsplit(input$chains, ",")[[1]]
+    pw_mats <- lapply(chains_net, function(ch) tr[[paste0("pw_", ch)]])
+    pw_mats <- Filter(Negate(is.null), pw_mats)
+    pw_alpha_beta_max <- if (length(pw_mats) > 0) max(Reduce(`+`, pw_mats)) else 200
     
-    # Render the network visualization
-    observeEvent(c(input$max_dist, input$color_var,input$check_net_selfloops,input$epitope_sel_network,input$chain_select_network), {
-      req(analysis_results())
-      tryCatch({
-        tr <- analysis_results()
-        chains <- input$chain_select_network
-        tr<-subset_tr_by_epitope(tr,epitope_name = input$epitope_sel_network,chain = chains)
-        # Recompute network with current edge threshold
-        if (length(chains) == 2) {
-          pw_alpha_beta_max <- max(tr$pw_beta + tr$pw_alpha)
-        } else {
-          pw_alpha_beta_max <- max(tr[[paste0("pw_", chains)]])
-        }
-        
-        
-        net_data <- generate_network(tr,input$max_dist,input$check_net_selfloops)
-        
-        if (nrow(net_data) == 0) {
-          # No edges at this threshold
-          output$network_plot <- renderVisNetwork({
-            visNetwork(
-              nodes = data.frame(id = 1, label = "No edges at this distance threshold"),
-              edges = data.frame(from = numeric(0), to = numeric(0))
-            )
-          })
-          output$node_count <- renderText("Nodes: 0")
-          output$edge_count <- renderText("Edges: 0")
-          return()
-        }
-        
-        # Extract unique nodes and their metadata
-        clone_df <- as.data.frame(tr$clone_df)
-        all_node_ids <- unique(c(net_data$node_1, net_data$node_2))
-        
-        # Create nodes data frame with color variable
-        color_var <- input$color_var
-        nodes <- data.frame(
-          id = all_node_ids,
-          label = all_node_ids,
-          title = paste0(
-            "Clone ID: ", all_node_ids, "<br>",
-            "Subject: ", clone_df$subject[all_node_ids + 1],"<br>",
-            "Epitope: ", clone_df$epitope[all_node_ids + 1],"<br>",
-            "V-Alpha: ", clone_df$v_a_gene[all_node_ids + 1],"<br>",
-            "V-Beta: ", clone_df$v_b_gene[all_node_ids + 1],"<br>",
-            "CDR3-A: ", clone_df$cdr3_a_aa[all_node_ids + 1],"<br>",
-            "CDR3-B: ", clone_df$cdr3_b_aa[all_node_ids + 1],"<br>",
-            "Col by: ",color_var),
-          group = as.character(clone_df[[color_var]][all_node_ids + 1]),
-          size = 20
-        )
-        
-        # Create edges data frame with weights inversely proportional to distance
-        # (closer clones = thicker edges)
-        edges <- data.frame(
-          from = net_data$node_1,
-          to = net_data$node_2,
-          width = 5 - (net_data$dist / max(net_data$dist)) * 4,  # Width between 1-5
-          title = paste0(
-            "Distance: ", round(net_data$dist, 2), "<br>",
-            "Epitope 1: ", net_data$epitope_1, "<br>",
-            "Epitope 2: ", net_data$epitope_2
-          )
-        ) %>% filter(from != to)
-        
-        # Render the network
-        output$network_plot <- renderVisNetwork({
-          visNetwork(nodes, edges) %>%
-            visOptions(
-              highlightNearest = TRUE,
-              nodesIdSelection = TRUE,
-              selectedBy = "group"
-            ) %>%
-            visLayout(randomSeed = 123) %>%
-            visPhysics(
-              enabled = TRUE,
-              stabilization = list(iterations = 200)
-            ) %>%
-            visInteraction(navigationButtons = TRUE)
-        })
-        
-        # Update statistics
-        output$node_count <- renderText(paste("Nodes:", nrow(nodes)))
-        output$edge_count <- renderText(paste("Edges:", nrow(edges)))
-        
-      }, error = function(e) {
-        if (!inherits(e, "shiny.silent.error")) {
-          message.error <- paste0("Error rendering network: ", e$message)
-          render_error_ui(message.error, output)
-          message(message.error)
-        }
-      })
+    all_color_choices <- c(
+      "Epitope" = "epitope",
+      "Subject" = "subject",
+      "V-alpha-gene" = "v_a_gene",
+      "V-beta-gene" = "v_b_gene",
+      "CDR3-alpha-aa" = "cdr3_a_aa",
+      "CDR3-beta-aa" = "cdr3_b_aa",
+      "V-gamma-gene" = "v_g_gene",
+      "V-delta-gene" = "v_d_gene",
+      "CDR3-gamma-aa" = "cdr3_g_aa",
+      "CDR3-delta-aa" = "cdr3_d_aa"
+    )
+    avail_color_choices <- all_color_choices[all_color_choices %in% names(tr$clone_df)]
+    
+    output$networkcard <- renderUI({
+      tagList(
+        hr(),
+        card(
+          layout_sidebar(
+            sidebar = sidebar(
+              h4("Network options"),
+              hr(),
+              helpText("Filter edges by radius, epitope, and choose how to color the nodes."),
+              hr(),
+              selectizeInput(
+                "epitope_sel_network",
+                "Select Epitopes:",
+                selected = epitopes,
+                choices = epitopes,
+                multiple = T,
+                options = list(placeholder = "Select Epitope:")
+              ),
+              selectizeInput(
+                "chain_select_network",
+                "Select chain(s):",
+                choices = chains_net,
+                selected = chains_net,
+                multiple = TRUE,
+                options = list(placeholder = "Select chain(s)")
+              ),
+              # Slider to filter maximum distance
+              sliderInput("max_dist",
+                          "TCR distance:",
+                          min = 0,
+                          max = pw_alpha_beta_max,
+                          value = min(default_tcr_distance, pw_alpha_beta_max),
+                          step = 1),
+              # Dropdown to color nodes
+              selectInput("color_var",
+                          "Color Nodes By:",
+                          choices = avail_color_choices),
+              hr(),
+              checkboxInput("check_net_selfloops", "Remove CDR3 self-loops"),
+              hr(),
+            ),
+            card(
+              p(strong("Network Stats:")),
+              textOutput("node_count"),
+              textOutput("edge_count"),
+              hr(),
+              withSpinner(visNetworkOutput("network_plot", height = "750px"), )
+            ))
+        ))
     })
     
     #Load chains in Neighbourhood
@@ -428,11 +346,109 @@ server <- function(input, output, session) {
     
   })
   
+  # Render the network visualization (top-level observer, not nested inside observe())
+  observeEvent(c(input$max_dist, input$color_var, input$check_net_selfloops, input$epitope_sel_network, input$chain_select_network), {
+    req(analysis_results())
+    req(input$chain_select_network, input$epitope_sel_network, input$color_var, !is.null(input$max_dist))
+    tryCatch({
+      tr <- analysis_results()
+      chains_sel <- input$chain_select_network
+      tr <- subset_tr_by_epitope(tr, epitope_name = input$epitope_sel_network, chain = chains_sel)
+      
+      net_data <- generate_network(tr, input$max_dist, input$check_net_selfloops)
+      
+      if (nrow(net_data) == 0) {
+        # No edges at this threshold
+        output$network_plot <- renderVisNetwork({
+          visNetwork(
+            nodes = data.frame(id = 1, label = "No edges at this distance threshold"),
+            edges = data.frame(from = numeric(0), to = numeric(0))
+          )
+        })
+        output$node_count <- renderText("Nodes: 0")
+        output$edge_count <- renderText("Edges: 0")
+        return()
+      }
+      
+      # Extract unique nodes and their metadata
+      clone_df <- as.data.frame(tr$clone_df)
+      all_node_ids <- unique(c(net_data$node_1, net_data$node_2))
+      row_idx <- all_node_ids + 1
+      
+      # Create nodes data frame with color variable
+      color_var <- input$color_var
+      if (!color_var %in% colnames(clone_df)) {
+        color_var <- "epitope"
+      }
+      safe_val <- function(col) {
+        if (col %in% colnames(clone_df)) as.character(clone_df[[col]][row_idx]) else "N/A"
+      }
+      nodes <- data.frame(
+        id = all_node_ids,
+        label = all_node_ids,
+        title = paste0(
+          "Clone ID: ", all_node_ids, "<br>",
+          "Subject: ", safe_val("subject"), "<br>",
+          "Epitope: ", safe_val("epitope"), "<br>",
+          "V-Alpha: ", safe_val("v_a_gene"), "<br>",
+          "V-Beta: ", safe_val("v_b_gene"), "<br>",
+          "CDR3-A: ", safe_val("cdr3_a_aa"), "<br>",
+          "CDR3-B: ", safe_val("cdr3_b_aa"), "<br>",
+          "Col by: ", color_var),
+        group = as.character(clone_df[[color_var]][row_idx]),
+        size = 20
+      )
+      
+      max_edge_dist <- max(net_data$dist, na.rm = TRUE)
+      edge_widths <- if (max_edge_dist > 0) 5 - (net_data$dist / max_edge_dist) * 4 else rep(3, nrow(net_data))
+      
+      # Create edges data frame with weights inversely proportional to distance
+      # (closer clones = thicker edges)
+      edges <- data.frame(
+        from = net_data$node_1,
+        to = net_data$node_2,
+        width = edge_widths,  # Width between 1-5
+        title = paste0(
+          "Distance: ", round(net_data$dist, 2), "<br>",
+          "Epitope 1: ", net_data$epitope_1, "<br>",
+          "Epitope 2: ", net_data$epitope_2
+        )
+      ) %>% filter(from != to)
+      
+      # Render the network
+      output$network_plot <- renderVisNetwork({
+        visNetwork(nodes, edges) %>%
+          visOptions(
+            highlightNearest = TRUE,
+            nodesIdSelection = TRUE,
+            selectedBy = "group"
+          ) %>%
+          visLayout(randomSeed = 123) %>%
+          visPhysics(
+            enabled = TRUE,
+            stabilization = list(iterations = 200)
+          ) %>%
+          visInteraction(navigationButtons = TRUE)
+      })
+      
+      # Update statistics
+      output$node_count <- renderText(paste("Nodes:", nrow(nodes)))
+      output$edge_count <- renderText(paste("Edges:", nrow(edges)))
+      
+    }, error = function(e) {
+      if (!inherits(e, "shiny.silent.error")) {
+        message.error <- paste0("Error rendering network: ", e$message)
+        render_error_ui(message.error, output)
+        message(message.error)
+      }
+    })
+  })
+  
   
   #######################Plot Diversity plots###################################
   output$diversityPlot <- renderPlot({
     req(analysis_results())
-    counts <- analysis_results()$cell_df$count
+    counts <- analysis_results()$clone_df$count
     # Generate a simple Lorenz Curve for Diversity
     df_plot <- data.frame(counts = sort(counts, decreasing = TRUE)) %>%
       mutate(
@@ -441,10 +457,10 @@ server <- function(input, output, session) {
       )
     
     ggplot(df_plot, aes(x = index, y = cum_counts)) +
-      geom_line(color = "steelblue", size = 1.2) +
+      geom_line(color = "steelblue", linewidth = 1.2) +
       geom_abline(lty = 2) +
       labs(title = "TCR Repertoire Evenness (Lorenz Curve)",
-           x = "Fraction of Unique Clotypes",
+           x = "Fraction of Unique Clonotypes",
            y = "Cumulative Fraction of Total Template Count") +
       theme_minimal()
   })
@@ -883,7 +899,7 @@ server <- function(input, output, session) {
     
     if(length(epitope_knn_sel)==1)
     {
-      return(tr)
+      return(subset_tr_by_epitope(tr, NULL))
     }
     else{
       return(subset_tr_by_epitope(tr,epitope_knn_sel))
@@ -895,7 +911,7 @@ server <- function(input, output, session) {
     render_error_ui("", output = output) #Clear any error messages
     tryCatch({
       withProgress(
-        message = paste0("Run KNN with ", input$epitope_sel_n, ":"),
+        message = paste0("Run KNN with ", paste0(input$epitope_sel_n, collapse = ", "), ":"),
         value = 0,
         {
           tr <- epitope_dist_mat_KNN()
@@ -907,23 +923,25 @@ server <- function(input, output, session) {
           np <- import("numpy")
           chain <- input$chain_select_knn
           message("Computing for chain", chain)
-          # diff testing is pasted on binary comparison, so all epitope not 'PA' are set to 'X'
-          epitope_n <-epi_1<-input$epitope_sel_n
+          # diff testing is based on binary comparison, so all epitopes not matching epi_1 are set to 'Other' or epitope 2
+          epitope_n <- epi_1 <- input$epitope_sel_n
           if(length(epi_1)>1)
             epi_1<-epi_1[1]
           
           message("Selected epitope is ",epi_1,"\n")
+          clone_df <- as.data.frame(tr$clone_df)
+          rownames(clone_df) <- NULL
           
           if(length(epitope_n)==1)
           {
-            # Code to handle mu]ltiple epitopes
-            tr$clone_df[,epi_1]= ifelse(
-              tr$clone_df$epitope==epi_1,epi_1,"Other")
+            # Code to handle multiple epitopes
+            clone_df[, epi_1] <- ifelse(
+              clone_df$epitope == epi_1, epi_1, "Other")
             epitope_n <- list(epitope_n)
           }
           else{
-            tr$clone_df[, epi_1] = ifelse(tr$clone_df$epitope ==
-                                                 epi_1, epi_1,epitope_n[2])
+            clone_df[, epi_1] <- ifelse(
+              clone_df$epitope == epi_1, epi_1, epitope_n[2])
           }
           
           if(length(chain)==1)
@@ -938,7 +956,7 @@ server <- function(input, output, session) {
           incProgress(0.5, "Running neighbourhood differential...")
           # Larger Radius
           nn_df = rep_diff$neighborhood_diff(
-            clone_df = tr$clone_df,
+            clone_df = clone_df,
             pwmat = pwmat,
             count_col = 'count',
             x_cols = r_to_py(list(c(epi_1))),
@@ -957,7 +975,7 @@ server <- function(input, output, session) {
               'FWERp',
               'FDRq'
             )
-          ) %>% arrange('FDRq') %>% arrange(desc(OR), desc(ct_0))
+          ) %>% arrange(FDRq, desc(OR), desc(ct_0))
           output$fixedradius_output_ui <- renderUI({
             withSpinner(DT::dataTableOutput("fixedradius_output"))
           })
@@ -966,9 +984,9 @@ server <- function(input, output, session) {
           session.id <- session$token
           file.name = paste0(
             'TCRdist3-KNN-clustering-',
-            input$epitope_sel_n,
+            paste0(input$epitope_sel_n, collapse = "_"),
             "-",
-            chain,
+            paste0(chain, collapse = "_"),
             "-",
             session.id
           )
@@ -1036,23 +1054,18 @@ server <- function(input, output, session) {
     })
   })
   
-  
-  observeEvent(input$run_Hierarch, {
-    hierarch_tabs_check(FALSE)
-    #neighbour_results()
-  })
-  
   epitope_results_hierarch <- eventReactive(input$epitope_sel_h, {
     render_error_ui("", output = output) #Clear any error messages
     req(tcr_data())
     epitope_h_sel<-input$epitope_sel_h
     tr<-analysis_results()
+    req(tr)
     if(length(epitope_h_sel)==1)
     {
-      return(tr)
+      return(subset_tr_by_epitope(tr, NULL))
     }
     else{
-      return(subset_tr_by_epitope(analysis_results(),epitope_h_sel))
+      return(subset_tr_by_epitope(tr, epitope_h_sel))
     }
   })
   
@@ -1060,7 +1073,6 @@ server <- function(input, output, session) {
   #neighbour_results <- eventReactive(
   observeEvent(input$run_Hierarch, {
     render_error_ui("", output = output) #Clear any error messages
-    req(!hierarch_tabs_check())
     hierarch_tabs_check(TRUE)
     withProgress(message = 'Running hierarchical neighbourhood clustering...', value = 0, {
       tryCatch({
@@ -1072,17 +1084,19 @@ server <- function(input, output, session) {
         if(length(epi_1)>1)
           epi_1<-epi_1[1]
         message("Selected epitope is ",epi_1,"\n")
+        clone_df <- as.data.frame(tr.this$clone_df)
+        rownames(clone_df) <- NULL
         
         if(length(epitope_h)==1)
         {
-          # Code to handle mu]ltiple epitopes
-          tr.this$clone_df[,epi_1]= ifelse(
-            tr.this$clone_df$epitope==epi_1,epi_1,"Other")
+          # Code to handle multiple epitopes
+          clone_df[, epi_1] <- ifelse(
+            clone_df$epitope == epi_1, epi_1, "Other")
           epitope_h <- list(epitope_h)
         }
         else{
-          tr.this$clone_df[, epi_1] = ifelse(tr.this$clone_df$epitope ==
-                                               epi_1, epi_1,epitope_h[2])
+          clone_df[, epi_1] <- ifelse(
+            clone_df$epitope == epi_1, epi_1, epitope_h[2])
         }
         rep_diff <- import("tcrdist.rep_diff")
         hierdiff <- import("hierdiff")
@@ -1099,13 +1113,13 @@ server <- function(input, output, session) {
           pwmat <- tr.this[[paste0("pw_", chain[1])]]+tr.this[[paste0("pw_", chain[2])]]
         }
         
-        res_Z <- rep_diff$hcluster_diff(tr.this$clone_df,pwmat,x_cols = r_to_py(as.list(c(epi_1))),count_col = 'count')
+        res_Z <- rep_diff$hcluster_diff(clone_df, pwmat, x_cols = r_to_py(as.list(c(epi_1))), count_col = 'count')
         res <- res_Z[[1]]
         Z <- res_Z[[2]]
         
         res_summary <- rep_diff$member_summ(
           res_df = res,
-          clone_df = tr.this$clone_df,
+          clone_df = clone_df,
           addl_cols = r_to_py(list('epitope'))
         )
         res_detailed = r_to_py(cbind(res, res_summary))
@@ -1188,7 +1202,7 @@ server <- function(input, output, session) {
         remove_www_tempfiles(session, "hierachical.html")
         html.file <- paste0(session$token, "_hierachical.html")
         write(html, temp_path)
-        file.copy(temp_path, file.path("www/", html.file))
+        file.copy(temp_path, file.path("www", html.file), overwrite = TRUE)
         
         output$hierachy_output_plot <- renderUI(
           tags$iframe(
@@ -1216,16 +1230,19 @@ server <- function(input, output, session) {
   })
   
   
-  #Generate Network Graph that will
+  #Generate Network Graph options when chain selection changes
   observeEvent(input$chain_select_neighbours, {
     tr <- analysis_results()
     
     tryCatch({
       req(tr)
       chain <- input$chain_select_neighbours
-      genes <- tr$clone_df[[paste0("v_", substr(chain, 1, 1), "_gene")]]
-      chain2check <- paste0("cdr3_", substring(chain, 1, 1), "_aa")
-      pw_matrix = tr[[paste0("pw_", chain2check)]]
+      req(length(chain) > 0)
+      first_chain <- chain[1]
+      genes <- tr$clone_df[[paste0("v_", substr(first_chain, 1, 1), "_gene")]]
+      chain2check <- paste0("cdr3_", substring(first_chain, 1, 1), "_aa")
+      pw_matrix <- tr[[paste0("pw_", chain2check)]]
+      req(!is.null(pw_matrix))
       updateSelectizeInput(
         session,
         "v_gene_filter",
@@ -1246,7 +1263,7 @@ server <- function(input, output, session) {
     }, error = function(e) {
       if (!inherits(e, "shiny.silent.error"))
       {
-        message.error <- paste0("Error updating TRVs", e$message)
+        message.error <- paste0("Error updating TRVs: ", e$message)
         output$genepairsplots <- renderUI(NULL)
         render_error_ui(message = message.error, output)
         message(message.error)
@@ -1375,8 +1392,8 @@ server <- function(input, output, session) {
   
   observeEvent(input$run_trees, {
     render_error_ui("", output = output) #Clear any error messages
-    tcr_data<-tcr_data()
-    req(tcr_data)
+    df_tcr <- tcr_data()
+    req(df_tcr)
     withProgress(message = 'Running trees...', value = 0, {
       tryCatch({
         #If more than one chain has been selected, then recompute distance matrix based on chain
@@ -1384,16 +1401,16 @@ server <- function(input, output, session) {
         output$showtrees <- reactive({
           return("show")
         })
-        epitopes_trees<-input$epitope_sel_trees
-        if(length(chain_trees)==length(chains()) & length(unique(tcr_data()$epitope))==length(epitopes_trees))
+        epitopes_trees <- input$epitope_sel_trees
+        if (length(chain_trees) == length(chains()) && length(unique(df_tcr$epitope)) == length(epitopes_trees))
         {
           message("Using already computed results")
-          tcr<-analysis_results()
+          tcr <- analysis_results()
         }
         else{
           incProgress(0.1, detail = "Computing distance matrix..")
           tcr <- get_epitope_dist_matrix(
-            tcr_data,
+            df_tcr,
             epitope_name = epitopes_trees,
             organism = input$organism,
             chains = chain_trees,
@@ -1401,7 +1418,7 @@ server <- function(input, output, session) {
           )  
         }
         outputOptions(output, "showtrees", suspendWhenHidden = FALSE)
-        output$tree_output_plot<-renderUI(NULL)
+        output$tree_output_plot <- renderUI(NULL)
         incProgress(0.3, detail = "Importing required library...")
         TCRtree <- import("tcrdist.tree")
         incProgress(0.4, detail = "Preparing data...")
@@ -1411,19 +1428,17 @@ server <- function(input, output, session) {
         remove_www_tempfiles(session, "tree.html")
         message("Running trees")
         tcrtree = TCRtree$TCRtree(tcrrep = tcr, html_name = temp.file)
-        View(tcrtree)
         incProgress(0.5, detail = "Building tree...")
         tcrtree$build_tree()
         incProgress(0.9, detail = "Finalizing...")
-        file.copy(temp.file, paste0("www/", file.name))
+        file.copy(temp.file, file.path("www", file.name), overwrite = TRUE)
         output$tree_output_plot <- renderUI({
           withSpinner(tags$iframe(
             src = file.name,
             width = "95%",
             style = "height: 90vh;",
             # Use CSS for full view port height
-            frameBorder = "0",
-            onload = "iframeLoaded()"
+            frameBorder = "0"
           ))
         })
       }, error = function(e)
@@ -1470,22 +1485,22 @@ server <- function(input, output, session) {
   # Top Plot: 1 - Simpson's (Clonality)
   output$simpsonPlot <- renderPlot({
     data <- processed_data()
-    ggplot(data.frame(val = data$one_minus_simpson, label = "Repertoire"), 
-           aes(x = label, y = val)) +
-      geom_point(color = "red", size = 4) +
+    ggplot(data.frame(val = data$one_minus_simpson, label = data$epitope), 
+           aes(x = label, y = val, color = label)) +
+      geom_point(size = 4, show.legend = FALSE) +
       ylim(0, 1) +
-      labs(title = "1-Simpson's Diversity (Clonality)", y = "1 - Simpson") +
+      labs(title = "1-Simpson's Diversity (Clonality)", x = "Epitope", y = "1 - Simpson") +
       theme_minimal()
   })
   
   # Bottom Plot: Inverse Simpson's (Diversity)
   output$invSimpsonPlot <- renderPlot({
     data <- processed_data()
-    ggplot(data.frame(val = data$inv_simpson, label = "Repertoire"), 
-           aes(x = label, y = val)) +
-      geom_bar(stat = "identity", fill = "steelblue") +
+    ggplot(data.frame(val = data$inv_simpson, label = data$epitope), 
+           aes(x = label, y = val, fill = label)) +
+      geom_col(show.legend = FALSE) +
       scale_y_log10() +
-      labs(title = "Inverse Simpson's Diversity", y = "Index (Log Scale)") +
+      labs(title = "Inverse Simpson's Diversity", x = "Epitope", y = "Index (Log Scale)") +
       theme_minimal()
   })
   
@@ -1533,24 +1548,10 @@ server <- function(input, output, session) {
     tryCatch({
       tr <- motif_filtered_tcr()
       req(tr)
-      epitopes_motif <- input$epitope_sel_motif
       message("Chain selected:", chain_motif)
-      # Get pairwise matrix
-      if (chain_motif == "alpha")
-        dist_mat <- tr$pw_alpha
-      else if (chain_motif == "beta")
-        dist_mat <- tr$pw_beta
-      else
-        dist_mat <- tr$pw_gamma
-      
-      output$motif_radius_ui<-renderUI({
-        sliderInput("motif_radius", 
-                    "TCR distance:", 
-                    min = 0, 
-                    max = max(dist_mat),
-                    value = 50L, 
-                    step = 1)
-      })
+      # Get pairwise matrix dynamically for alpha, beta, gamma, or delta
+      dist_mat <- tr[[paste0("pw_", chain_motif)]]
+      req(!is.null(dist_mat))
       return(dist_mat)
     }, error = function(e) {
       print(e$message)
@@ -1562,13 +1563,26 @@ server <- function(input, output, session) {
     })
   })
   
-  neighbors<-reactive({
+  observeEvent(c(input$chain_select_motif, input$epitope_sel_motif), {
     req(motif_pwmat())
-    dist_mat<-motif_pwmat()
-    radius<-input$motif_radius
-    # Find neighborhoods (clusters) around a radius ------------------
-    neighbors <- lapply(seq_len(nrow(dist_mat)) - 1, function(i) {
-      which(dist_mat[i + 1, ] <= radius) - 1  #zero-indexed for python-style logic
+    dist_mat <- motif_pwmat()
+    output$motif_radius_ui <- renderUI({
+      sliderInput("motif_radius",
+                  "TCR distance:",
+                  min = 0,
+                  max = max(dist_mat, na.rm = TRUE),
+                  value = min(50L, max(dist_mat, na.rm = TRUE)),
+                  step = 1)
+    })
+  })
+  
+  neighbors<-reactive({
+    req(motif_pwmat(), !is.null(input$motif_radius))
+    dist_mat <- motif_pwmat()
+    radius <- input$motif_radius
+    # Find neighborhoods (clusters) around a radius (1-indexed for R subsetting)
+    neighbors <- lapply(seq_len(nrow(dist_mat)), function(i) {
+      which(dist_mat[i, ] <= radius)
     })
     return(neighbors)
   })
@@ -1643,14 +1657,13 @@ server <- function(input, output, session) {
     motif_filtered_tcr()$clone_df[idx, , drop = FALSE]
   })
   
- observeEvent(c(input$run_motifs,input$cluster_id), {
-      req(neighbors(), tcr_data())
+ observeEvent(c(input$run_motifs, input$cluster_id), {
+      req(neighbors(), motif_filtered_tcr(), input$cluster_id, input$chain_select_motif)
       idx <- neighbors()[[as.integer(input$cluster_id)]]
-      print(idx)
       palmotif <- import("palmotif")
       chain_motif <- input$chain_select_motif
-      cdr3<-paste0("cdr3_",substr(chain_motif,1,1),"_aa")
-      cluster_seqs <- tcr_data()[[cdr3]][idx]
+      cdr3 <- paste0("cdr3_", substr(chain_motif, 1, 1), "_aa")
+      cluster_seqs <- motif_filtered_tcr()$clone_df[[cdr3]][idx]
       if (length(cluster_seqs) < 2) return(NULL)
       # palmotif needs a DataFrame with sequences (and optionally counts/weights)
       motif_input <- data.frame(seq = cluster_seqs, stringsAsFactors = FALSE)
@@ -1688,23 +1701,26 @@ server <- function(input, output, session) {
  
  # ---- Motif Sidebar quick summary --------------------------------------
  output$cluster_summary <- renderUI({
-   req(cluster_data())
+   req(cluster_data(), input$chain_select_motif)
    cd <- cluster_data()
    n_seqs   <- nrow(cd)
    chain_motif <- input$chain_select_motif
-   cdr3<-paste0("cdr3_",substr(chain_motif,1,1),"_aa")
+   chain_prefix <- substr(chain_motif, 1, 1)
+   cdr3  <- paste0("cdr3_", chain_prefix, "_aa")
+   vgene <- paste0("v_", chain_prefix, "_gene")
+   jgene <- paste0("j_", chain_prefix, "_gene")
    n_unique <- length(unique(cd[[cdr3]]))
    total_ct <- if ("count" %in% names(cd)) sum(cd$count, na.rm = TRUE) else NA
+   dom_v <- if (vgene %in% names(cd) && nrow(cd) > 0) names(sort(table(cd[[vgene]]), decreasing = TRUE))[1] else "N/A"
+   dom_j <- if (jgene %in% names(cd) && nrow(cd) > 0) names(sort(table(cd[[jgene]]), decreasing = TRUE))[1] else "N/A"
    
    tagList(
      h5("Cluster summary"),
      p(strong("Sequences in cluster: "), n_seqs),
      p(strong("Unique CDR3s: "), n_unique),
      if (!is.na(total_ct)) p(strong("Total clone count: "), total_ct),
-     p(strong("Dominant V gene: "),
-       names(sort(table(cd$v_b_gene), decreasing = TRUE))[1]),
-     p(strong("Dominant J gene: "),
-       names(sort(table(cd$j_b_gene), decreasing = TRUE))[1])
+     p(strong("Dominant V gene: "), dom_v),
+     p(strong("Dominant J gene: "), dom_j)
    )
  })
  
