@@ -389,6 +389,140 @@ ui <- page_sidebar(
         # hr(),
       ),
       ###########################################################
+      #                        Explore Results                  #
+      ###########################################################
+      tabPanel(
+        "Explore Results",
+        hr(),
+        conditionalPanel(
+          condition = "output.csvtest",
+          layout_sidebar(
+            sidebar = sidebar(
+              h5("Explorer Filters"),
+              uiOutput("explore_epitope_ui"),
+              uiOutput("explore_subject_ui"),
+              uiOutput("explore_chain_ui"),
+              uiOutput("explore_pw_matrix_ui"),
+              uiOutput("explore_color_by_ui"),
+              checkboxInput("explore_strip_allele", "Strip allele suffix (*01)", value = TRUE),
+              checkboxInput("explore_size_by_count", "Scale point size by clone count", value = TRUE),
+              width = 300
+            ),
+            card(
+              tabsetPanel(
+                id = "explore_subtabs",
+                tabPanel(
+                  "Distance Distributions",
+                  tags$br(),
+                  layout_columns(
+                    col_widths = c(4, 8),
+                    selectInput(
+                      "explore_dist_plot_type",
+                      "Distribution Plot Style:",
+                      choices = c(
+                        "Violin + Boxplot" = "violin",
+                        "Density Curves" = "density",
+                        "Empirical CDF (ECDF)" = "ecdf",
+                        "Histogram" = "histogram"
+                      ),
+                      selected = "violin"
+                    ),
+                    selectInput(
+                      "explore_dist_group_mode",
+                      "Compare Pairs By:",
+                      choices = c(
+                        "Within vs. Between Epitope" = "epitope_pair_type",
+                        "Within vs. Between Subject" = "subject_pair_type",
+                        "By Epitope (Within-Epitope Pairs)" = "within_epitope"
+                      ),
+                      selected = "epitope_pair_type"
+                    )
+                  ),
+                  withSpinner(plotlyOutput("explore_dist_plot", height = "420px")),
+                  hr(),
+                  h5("Component Distance Comparison (Chain / Region Correlation)"),
+                  withSpinner(plotlyOutput("explore_chain_corr_plot", height = "420px"))
+                ),
+                tabPanel(
+                  "2D / 3D Embedding (MDS)",
+                  tags$br(),
+                  layout_columns(
+                    col_widths = c(4, 8),
+                    radioButtons(
+                      "explore_mds_dims",
+                      "Embedding Dimensions:",
+                      choices = c("2D MDS" = "2d", "3D MDS" = "3d"),
+                      selected = "2d",
+                      inline = TRUE
+                    ),
+                    helpText("Classical Multidimensional Scaling (PCoA) projects clones into 2D/3D space preserving pairwise TCR distances.")
+                  ),
+                  withSpinner(plotlyOutput("explore_mds_plot", height = "650px"))
+                ),
+                tabPanel(
+                  "V-J Gene Usage",
+                  tags$br(),
+                  layout_columns(
+                    col_widths = c(4, 4, 4),
+                    selectInput(
+                      "explore_vj_metric",
+                      "Abundance Metric:",
+                      choices = c("Unique Clones" = "clones", "Total Template Count" = "count"),
+                      selected = "clones"
+                    ),
+                    numericInput(
+                      "explore_top_n_genes",
+                      "Max top genes to display:",
+                      value = 15,
+                      min = 5,
+                      max = 50,
+                      step = 5
+                    ),
+                    div()
+                  ),
+                  h5("V-J Gene Pairing Heatmap"),
+                  withSpinner(plotlyOutput("explore_vj_heatmap", height = "450px")),
+                  hr(),
+                  h5("Top V & J Gene Distribution"),
+                  withSpinner(plotlyOutput("explore_vj_barplot", height = "400px"))
+                ),
+                tabPanel(
+                  "CDR3 Spectratype & Logo",
+                  tags$br(),
+                  h5("CDR3 Amino Acid Length Distribution"),
+                  withSpinner(plotlyOutput("explore_cdr3_len_plot", height = "380px")),
+                  hr(),
+                  h5("Length-Stratified CDR3 Sequence Logo"),
+                  layout_columns(
+                    col_widths = c(6, 6),
+                    uiOutput("explore_logo_length_ui"),
+                    radioButtons(
+                      "explore_logo_method",
+                      "Logo Y-Axis:",
+                      choices = c("Information Content (Bits)" = "bits", "Probability" = "prob"),
+                      selected = "bits",
+                      inline = TRUE
+                    )
+                  ),
+                  withSpinner(plotOutput("explore_cdr3_logo", height = "280px"))
+                ),
+                tabPanel(
+                  "Clonotype & Public TCR Explorer",
+                  tags$br(),
+                  h5("Nearest-Neighbor TCR Distance vs. Clonal Expansion"),
+                  helpText("Clones with small nearest-neighbor distance belong to tight sequence clusters; points are shaped by whether the CDR3 is shared across multiple subjects (public) or private."),
+                  withSpinner(plotlyOutput("explore_nn_plot", height = "420px")),
+                  hr(),
+                  h5("Enriched Clonotype Table"),
+                  withSpinner(DT::dataTableOutput("explore_clones_table"))
+                )
+              ),
+              full_screen = TRUE
+            )
+          )
+        )
+      ),
+      ###########################################################
       #                        Export Results                   #
       ###########################################################
       tabPanel("Export Results", hr(), p("")),

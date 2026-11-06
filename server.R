@@ -1754,4 +1754,644 @@ server <- function(input, output, session) {
    )
  })
  
+ ##############################################################################
+ #                     Explore Results Tab                                    #
+ ##############################################################################
+ 
+ # Populate Explorer sidebar UI controls once tcrdist3 analysis is complete
+ observe({
+   tr <- analysis_results()
+   req(tr)
+   clone_df <- as.data.frame(tr$clone_df)
+   epitopes <- unique(as.character(clone_df$epitope))
+   subjects <- unique(as.character(clone_df$subject))
+   
+   all_names <- names(tr)
+   pw_names <- all_names[grepl("^pw_", all_names)]
+   chains_avail <- gsub("^pw_", "", pw_names[!grepl("cdr|pmhc", pw_names)])
+   
+   # Include a combined distance option when more than 1 chain was analyzed
+   pw_choices <- setNames(pw_names, pw_names)
+   if (length(chains_avail) > 1) {
+     pw_choices <- c("Combined (Sum of Chains)" = "pw_combined", pw_choices)
+   }
+   
+   color_candidates <- c(
+     "Epitope" = "epitope",
+     "Subject" = "subject",
+     "V-Alpha Gene" = "v_a_gene",
+     "J-Alpha Gene" = "j_a_gene",
+     "V-Beta Gene" = "v_b_gene",
+     "J-Beta Gene" = "j_b_gene",
+     "V-Gamma Gene" = "v_g_gene",
+     "J-Gamma Gene" = "j_g_gene",
+     "V-Delta Gene" = "v_d_gene",
+     "J-Delta Gene" = "j_d_gene",
+     "CDR3 Length" = "cdr3_length"
+   )
+   avail_colors <- color_candidates[
+     color_candidates %in% c(colnames(clone_df), "cdr3_length")
+   ]
+   
+   output$explore_epitope_ui <- renderUI({
+     selectizeInput(
+       "explore_epitopes",
+       "Filter Epitope(s):",
+       choices = epitopes,
+       selected = epitopes,
+       multiple = TRUE,
+       options = list(placeholder = "Select Epitope(s)")
+     )
+   })
+   
+   output$explore_subject_ui <- renderUI({
+     selectizeInput(
+       "explore_subjects",
+       "Filter Subject(s):",
+       choices = subjects,
+       selected = subjects,
+       multiple = TRUE,
+       options = list(placeholder = "Select Subject(s)")
+     )
+   })
+   
+   output$explore_chain_ui <- renderUI({
+     selectInput(
+       "explore_chain",
+       "Active Chain (for CDR3 / V-J):",
+       choices = chains_avail,
+       selected = chains_avail[1]
+     )
+   })
+   
+   output$explore_pw_matrix_ui <- renderUI({
+     selectInput(
+       "explore_pw_matrix",
+       "Distance Matrix:",
+       choices = pw_choices,
+       selected = pw_choices[1]
+     )
+   })
+   
+   output$explore_color_by_ui <- renderUI({
+     selectInput(
+       "explore_color_by",
+       "Color / Group By:",
+       choices = avail_colors,
+       selected = "epitope"
+     )
+   })
+ })
+ 
+ # Filtered clone_df and distance matrices for the Explorer tab
+ explore_data <- reactive({
+   tr <- analysis_results()
+   req(tr, input$explore_epitopes, input$explore_subjects, input$explore_chain, input$explore_pw_matrix)
+   
+   clone_df <- as.data.frame(tr$clone_df)
+   keep_idx <- which(
+     clone_df$epitope %in% input$explore_epitopes &
+       clone_df$subject %in% input$explore_subjects
+   )
+   req(length(keep_idx) >= 2)
+   
+   sub_df <- clone_df[keep_idx, , drop = FALSE]
+   rownames(sub_df) <- NULL
+   
+   # Strip allele suffix (*01) on gene columns if requested
+   gene_cols <- grep("_gene$", colnames(sub_df), value = TRUE)
+   if (isTRUE(input$explore_strip_allele)) {
+     for (gc in gene_cols) {
+       sub_df[[gc]] <- gsub("\\*.*", "", as.character(sub_df[[gc]]))
+     }
+   }
+   
+   chain_prefix <- substr(input$explore_chain, 1, 1)
+   cdr3_col <- paste0("cdr3_", chain_prefix, "_aa")
+   v_col <- paste0("v_", chain_prefix, "_gene")
+   j_col <- paste0("j_", chain_prefix, "_gene")
+   
+   if (cdr3_col %in% colnames(sub_df)) {
+     sub_df$cdr3_active <- as.character(sub_df[[cdr3_col]])
+     sub_df$cdr3_length <- nchar(sub_df$cdr3_active)
+   } else {
+     sub_df$cdr3_active <- NA_character_
+     sub_df$cdr3_length <- NA_integer_
+   }
+   
+   # Compute selected pairwise distance matrix
+   pw_names <- names(tr)[grepl("^pw_", names(tr))]
+   chains_avail <- gsub("^pw_", "", pw_names[!grepl("cdr|pmhc", pw_names)])
+   
+   if (input$explore_pw_matrix == "pw_combined") {
+     mats <- lapply(paste0("pw_", chains_avail), function(nm) tr[[nm]][keep_idx, keep_idx, drop = FALSE])
+     dist_mat <- Reduce(`+`, mats)
+   } else {
+     req(input$explore_pw_matrix %in% names(tr))
+     dist_mat <- tr[[input$explore_pw_matrix]][keep_idx, keep_idx, drop = FALSE]
+   }
+   
+   # Compute nearest-neighbor distance (excluding self) for each clone
+   diag_saved <- diag(dist_mat)
+   diag(dist_mat) <- Inf
+   nn_idx <- apply(dist_mat, 1, which.min)
+   nn_dist <- apply(dist_mat, 1, min)
+   diag(dist_mat) <- diag_saved
+   
+   sub_df$nearest_neighbor_dist <- nn_dist
+   sub_df$nearest_neighbor_epitope <- sub_df$epitope[nn_idx]
+   if ("clone_id" %in% colnames(sub_df)) {
+     sub_df$nearest_neighbor_clone <- sub_df$clone_id[nn_idx]
+   } else {
+     sub_df$nearest_neighbor_clone <- nn_idx
+   }
+   
+   # Publicness: number of distinct subjects sharing the active CDR3 sequence
+   if (cdr3_col %in% colnames(sub_df)) {
+     pub_counts <- sub_df %>%
+       dplyr::group_by(cdr3_active) %>%
+       dplyr::summarise(
+         n_subjects_sharing_cdr3 = dplyr::n_distinct(subject),
+         n_epitopes_sharing_cdr3 = dplyr::n_distinct(epitope),
+         .groups = "drop"
+       )
+     sub_df <- sub_df %>%
+       dplyr::left_join(pub_counts, by = "cdr3_active") %>%
+       dplyr::mutate(
+         clonotype_sharing = ifelse(n_subjects_sharing_cdr3 > 1, "Public (>1 Subject)", "Private (1 Subject)")
+       )
+   } else {
+     sub_df$n_subjects_sharing_cdr3 <- 1L
+     sub_df$n_epitopes_sharing_cdr3 <- 1L
+     sub_df$clonotype_sharing <- "Private (1 Subject)"
+   }
+   
+   list(
+     clone_df = sub_df,
+     dist_mat = dist_mat,
+     keep_idx = keep_idx,
+     cdr3_col = cdr3_col,
+     v_col = v_col,
+     j_col = j_col,
+     chains_avail = chains_avail
+   )
+ })
+ 
+ # 1A. Distance Distribution Plot
+ output$explore_dist_plot <- renderPlotly({
+   ed <- explore_data()
+   req(ed)
+   dist_mat <- ed$dist_mat
+   sub_df <- ed$clone_df
+   
+   upper_idx <- which(row(dist_mat) < col(dist_mat), arr.ind = TRUE)
+   req(nrow(upper_idx) > 0)
+   
+   r_idx <- upper_idx[, 1]
+   c_idx <- upper_idx[, 2]
+   
+   pairs_df <- data.frame(
+     dist = dist_mat[upper_idx],
+     epi_1 = as.character(sub_df$epitope[r_idx]),
+     epi_2 = as.character(sub_df$epitope[c_idx]),
+     subj_1 = as.character(sub_df$subject[r_idx]),
+     subj_2 = as.character(sub_df$subject[c_idx]),
+     stringsAsFactors = FALSE
+   ) %>%
+     dplyr::mutate(
+       epitope_pair_type = ifelse(epi_1 == epi_2, "Within Same Epitope", "Between Different Epitopes"),
+       subject_pair_type = ifelse(subj_1 == subj_2, "Within Same Subject", "Between Different Subjects"),
+       within_epitope = ifelse(epi_1 == epi_2, epi_1, NA_character_)
+     )
+   
+   group_mode <- input$explore_dist_group_mode
+   if (group_mode == "within_epitope") {
+     pairs_df <- pairs_df %>% dplyr::filter(!is.na(within_epitope))
+     req(nrow(pairs_df) > 0)
+     pairs_df$group <- pairs_df$within_epitope
+   } else {
+     pairs_df$group <- pairs_df[[group_mode]]
+   }
+   
+   # Cap pair sample size for smooth interactive plotting on very large repertoires
+   if (nrow(pairs_df) > 25000) {
+     set.seed(42)
+     pairs_df <- pairs_df[sample(nrow(pairs_df), 25000), , drop = FALSE]
+   }
+   
+   plot_type <- input$explore_dist_plot_type
+   if (plot_type == "violin") {
+     p <- ggplot(pairs_df, aes(x = group, y = dist, fill = group)) +
+       geom_violin(alpha = 0.6, trim = FALSE) +
+       geom_boxplot(width = 0.15, outlier.shape = NA, alpha = 0.8) +
+       labs(
+         title = paste("Pairwise TCR Distance Distribution (", input$explore_pw_matrix, ")"),
+         x = NULL,
+         y = "Pairwise TCR Distance",
+         fill = "Pair Group"
+       ) +
+       theme_minimal(base_size = 12)
+   } else if (plot_type == "density") {
+     p <- ggplot(pairs_df, aes(x = dist, color = group, fill = group)) +
+       geom_density(alpha = 0.3, linewidth = 1) +
+       labs(
+         title = paste("Pairwise TCR Distance Density (", input$explore_pw_matrix, ")"),
+         x = "Pairwise TCR Distance",
+         y = "Density",
+         color = "Pair Group",
+         fill = "Pair Group"
+       ) +
+       theme_minimal(base_size = 12)
+   } else if (plot_type == "ecdf") {
+     p <- ggplot(pairs_df, aes(x = dist, color = group)) +
+       stat_ecdf(geom = "step", linewidth = 1.1) +
+       labs(
+         title = paste("Empirical Cumulative Distribution of TCR Distances (", input$explore_pw_matrix, ")"),
+         x = "Pairwise TCR Distance",
+         y = "Cumulative Probability F(d)",
+         color = "Pair Group"
+       ) +
+       theme_minimal(base_size = 12)
+   } else {
+     p <- ggplot(pairs_df, aes(x = dist, fill = group)) +
+       geom_histogram(bins = 35, alpha = 0.65, position = "identity") +
+       labs(
+         title = paste("Pairwise TCR Distance Histogram (", input$explore_pw_matrix, ")"),
+         x = "Pairwise TCR Distance",
+         y = "Pair Count",
+         fill = "Pair Group"
+       ) +
+       theme_minimal(base_size = 12)
+   }
+   
+   ggplotly(p) %>% config(responsive = TRUE)
+ })
+ 
+ # 1B. Chain vs. Chain (or CDR3 vs. full chain) Distance Comparison Plot
+ output$explore_chain_corr_plot <- renderPlotly({
+   ed <- explore_data()
+   tr <- analysis_results()
+   req(ed, tr)
+   keep_idx <- ed$keep_idx
+   sub_df <- ed$clone_df
+   chains_avail <- ed$chains_avail
+   
+   upper_idx <- which(row(ed$dist_mat) < col(ed$dist_mat), arr.ind = TRUE)
+   req(nrow(upper_idx) > 0)
+   if (nrow(upper_idx) > 8000) {
+     set.seed(42)
+     upper_idx <- upper_idx[sample(nrow(upper_idx), 8000), , drop = FALSE]
+   }
+   
+   if (length(chains_avail) >= 2) {
+     ch1 <- chains_avail[1]
+     ch2 <- chains_avail[2]
+     mat1 <- tr[[paste0("pw_", ch1)]][keep_idx, keep_idx, drop = FALSE]
+     mat2 <- tr[[paste0("pw_", ch2)]][keep_idx, keep_idx, drop = FALSE]
+     x_lab <- paste0("pw_", ch1, " Distance")
+     y_lab <- paste0("pw_", ch2, " Distance")
+   } else {
+     ch1 <- chains_avail[1]
+     ch_prefix <- substr(ch1, 1, 1)
+     cdr3_pw <- paste0("pw_cdr3_", ch_prefix, "_aa")
+     mat1 <- tr[[paste0("pw_", ch1)]][keep_idx, keep_idx, drop = FALSE]
+     mat2 <- if (cdr3_pw %in% names(tr)) tr[[cdr3_pw]][keep_idx, keep_idx, drop = FALSE] else mat1
+     x_lab <- paste0("pw_", ch1, " (Full Chain Distance)")
+     y_lab <- paste0(cdr3_pw, " (CDR3 Distance)")
+   }
+   
+   r_idx <- upper_idx[, 1]
+   c_idx <- upper_idx[, 2]
+   df_corr <- data.frame(
+     d1 = mat1[upper_idx],
+     d2 = mat2[upper_idx],
+     pair_type = ifelse(
+       sub_df$epitope[r_idx] == sub_df$epitope[c_idx],
+       paste0("Same Epitope (", sub_df$epitope[r_idx], ")"),
+       "Different Epitopes"
+     ),
+     stringsAsFactors = FALSE
+   )
+   
+   p <- ggplot(df_corr, aes(x = d1, y = d2, color = pair_type)) +
+     geom_point(alpha = 0.55, size = 1.8) +
+     labs(
+       title = paste(x_lab, "vs.", y_lab),
+       x = x_lab,
+       y = y_lab,
+       color = "Pair Type"
+     ) +
+     theme_minimal(base_size = 12)
+   
+   ggplotly(p) %>% config(responsive = TRUE)
+ })
+ 
+ # 2. 2D / 3D Classical MDS Embedding Plot
+ output$explore_mds_plot <- renderPlotly({
+   ed <- explore_data()
+   req(ed, input$explore_color_by)
+   dist_mat <- ed$dist_mat
+   sub_df <- ed$clone_df
+   
+   k_dims <- ifelse(input$explore_mds_dims == "3d", 3, 2)
+   req(nrow(dist_mat) > k_dims)
+   
+   mds_coords <- tryCatch({
+     stats::cmdscale(as.dist(dist_mat), k = k_dims, eig = FALSE)
+   }, error = function(e) {
+     matrix(0, nrow = nrow(dist_mat), ncol = k_dims)
+   })
+   
+   if (ncol(mds_coords) < k_dims) {
+     mds_coords <- cbind(mds_coords, matrix(0, nrow = nrow(dist_mat), ncol = k_dims - ncol(mds_coords)))
+   }
+   
+   color_col <- input$explore_color_by
+   if (!color_col %in% colnames(sub_df)) {
+     color_col <- "epitope"
+   }
+   
+   sub_df$MDS1 <- mds_coords[, 1]
+   sub_df$MDS2 <- mds_coords[, 2]
+   sub_df$color_group <- sub_df[[color_col]]
+   sub_df$pt_size <- if (isTRUE(input$explore_size_by_count) && "count" %in% colnames(sub_df)) {
+     pmax(6, pmin(22, 6 + 3 * log2(sub_df$count + 1)))
+   } else {
+     rep(9, nrow(sub_df))
+   }
+   
+   hover_txt <- paste0(
+     "<b>Epitope:</b> ", sub_df$epitope,
+     "<br><b>Subject:</b> ", sub_df$subject,
+     "<br><b>Count:</b> ", sub_df$count,
+     "<br><b>Active CDR3:</b> ", sub_df$cdr3_active,
+     "<br><b>Nearest Neighbor Dist:</b> ", round(sub_df$nearest_neighbor_dist, 1),
+     "<br><b>", color_col, ":</b> ", sub_df$color_group
+   )
+   
+   if (input$explore_mds_dims == "3d") {
+     sub_df$MDS3 <- mds_coords[, 3]
+     plot_ly(
+       data = sub_df,
+       x = ~MDS1,
+       y = ~MDS2,
+       z = ~MDS3,
+       color = ~as.factor(color_group),
+       text = hover_txt,
+       hoverinfo = "text",
+       type = "scatter3d",
+       mode = "markers",
+       marker = list(size = ~pt_size / 1.5, opacity = 0.8)
+     ) %>%
+       layout(
+         title = paste("3D MDS of TCR Distances (", input$explore_pw_matrix, ") - Colored by", color_col),
+         scene = list(
+           xaxis = list(title = "MDS 1"),
+           yaxis = list(title = "MDS 2"),
+           zaxis = list(title = "MDS 3")
+         )
+       )
+   } else {
+     plot_ly(
+       data = sub_df,
+       x = ~MDS1,
+       y = ~MDS2,
+       color = ~as.factor(color_group),
+       text = hover_txt,
+       hoverinfo = "text",
+       type = "scatter",
+       mode = "markers",
+       marker = list(size = ~pt_size, opacity = 0.78)
+     ) %>%
+       layout(
+         title = paste("2D MDS of TCR Distances (", input$explore_pw_matrix, ") - Colored by", color_col),
+         xaxis = list(title = "MDS 1"),
+         yaxis = list(title = "MDS 2")
+       )
+   }
+ })
+ 
+ # 3A. V-J Gene Pairing Heatmap
+ output$explore_vj_heatmap <- renderPlotly({
+   ed <- explore_data()
+   req(ed)
+   sub_df <- ed$clone_df
+   v_col <- ed$v_col
+   j_col <- ed$j_col
+   req(v_col %in% colnames(sub_df), j_col %in% colnames(sub_df))
+   
+   top_n <- max(5, as.integer(input$explore_top_n_genes %||% 15))
+   metric <- input$explore_vj_metric %||% "clones"
+   
+   top_v <- sub_df %>%
+     dplyr::count(.data[[v_col]], wt = if (metric == "count") count else NULL, sort = TRUE) %>%
+     dplyr::slice_head(n = top_n) %>%
+     dplyr::pull(1)
+   top_j <- sub_df %>%
+     dplyr::count(.data[[j_col]], wt = if (metric == "count") count else NULL, sort = TRUE) %>%
+     dplyr::slice_head(n = top_n) %>%
+     dplyr::pull(1)
+   
+   vj_df <- sub_df %>%
+     dplyr::filter(.data[[v_col]] %in% top_v, .data[[j_col]] %in% top_j) %>%
+     dplyr::group_by(V_Gene = .data[[v_col]], J_Gene = .data[[j_col]]) %>%
+     dplyr::summarise(
+       Abundance = if (metric == "count") sum(count, na.rm = TRUE) else dplyr::n(),
+       .groups = "drop"
+     )
+   
+   p <- ggplot(vj_df, aes(x = J_Gene, y = V_Gene, fill = Abundance)) +
+     geom_tile(color = "white") +
+     scale_fill_viridis_c(option = "plasma") +
+     labs(
+       title = paste("V-J Gene Pairing (", toupper(input$explore_chain), "Chain)"),
+       x = "J Gene",
+       y = "V Gene",
+       fill = ifelse(metric == "count", "Total Count", "Clones")
+     ) +
+     theme_minimal(base_size = 11) +
+     theme(axis.text.x = element_text(angle = 45, hjust = 1))
+   
+   ggplotly(p) %>% config(responsive = TRUE)
+ })
+ 
+ # 3B. Top V & J Gene Barplot
+ output$explore_vj_barplot <- renderPlotly({
+   ed <- explore_data()
+   req(ed)
+   sub_df <- ed$clone_df
+   v_col <- ed$v_col
+   j_col <- ed$j_col
+   req(v_col %in% colnames(sub_df), j_col %in% colnames(sub_df))
+   
+   top_n <- max(5, as.integer(input$explore_top_n_genes %||% 15))
+   metric <- input$explore_vj_metric %||% "clones"
+   
+   v_long <- sub_df %>%
+     dplyr::transmute(epitope = epitope, segment = "V Gene", gene = .data[[v_col]], count = count)
+   j_long <- sub_df %>%
+     dplyr::transmute(epitope = epitope, segment = "J Gene", gene = .data[[j_col]], count = count)
+   
+   combined_genes <- dplyr::bind_rows(v_long, j_long)
+   top_genes <- combined_genes %>%
+     dplyr::group_by(segment, gene) %>%
+     dplyr::summarise(total = if (metric == "count") sum(count, na.rm = TRUE) else dplyr::n(), .groups = "drop") %>%
+     dplyr::group_by(segment) %>%
+     dplyr::slice_max(total, n = top_n, with_ties = FALSE)
+   
+   plot_df <- combined_genes %>%
+     dplyr::inner_join(top_genes %>% dplyr::select(segment, gene), by = c("segment", "gene")) %>%
+     dplyr::group_by(segment, gene, epitope) %>%
+     dplyr::summarise(
+       Abundance = if (metric == "count") sum(count, na.rm = TRUE) else dplyr::n(),
+       .groups = "drop"
+     )
+   
+   p <- ggplot(plot_df, aes(x = reorder(gene, Abundance), y = Abundance, fill = epitope)) +
+     geom_col() +
+     coord_flip() +
+     facet_wrap(~segment, scales = "free") +
+     labs(
+       title = paste("Top V & J Gene Usage by Epitope (", toupper(input$explore_chain), "Chain)"),
+       x = NULL,
+       y = ifelse(metric == "count", "Total Template Count", "Number of Clones"),
+       fill = "Epitope"
+     ) +
+     theme_minimal(base_size = 11)
+   
+   ggplotly(p) %>% config(responsive = TRUE)
+ })
+ 
+ # 4A. CDR3 Amino Acid Length Distribution (Spectratype)
+ output$explore_cdr3_len_plot <- renderPlotly({
+   ed <- explore_data()
+   req(ed)
+   sub_df <- ed$clone_df %>% dplyr::filter(!is.na(cdr3_length))
+   req(nrow(sub_df) > 0)
+   
+   len_df <- sub_df %>%
+     dplyr::group_by(epitope, cdr3_length) %>%
+     dplyr::summarise(n_clones = dplyr::n(), total_count = sum(count, na.rm = TRUE), .groups = "drop")
+   
+   p <- ggplot(len_df, aes(x = factor(cdr3_length), y = n_clones, fill = epitope)) +
+     geom_col(position = "dodge") +
+     labs(
+       title = paste("CDR3 Length Spectratype (", toupper(input$explore_chain), "Chain)"),
+       x = "CDR3 Amino Acid Length (aa)",
+       y = "Number of Clones",
+       fill = "Epitope"
+     ) +
+     theme_minimal(base_size = 12)
+   
+   ggplotly(p) %>% config(responsive = TRUE)
+ })
+ 
+ # 4B. Dynamic selector for CDR3 length logo
+ output$explore_logo_length_ui <- renderUI({
+   ed <- explore_data()
+   req(ed)
+   sub_df <- ed$clone_df %>% dplyr::filter(!is.na(cdr3_length), cdr3_length > 0)
+   req(nrow(sub_df) > 0)
+   
+   len_tab <- sort(table(sub_df$cdr3_length), decreasing = TRUE)
+   avail_lens <- as.integer(names(len_tab))
+   choices_labeled <- setNames(avail_lens, paste0(avail_lens, " aa (n=", as.integer(len_tab), ")"))
+   
+   selectInput(
+     "explore_logo_len",
+     "Select CDR3 Length for Sequence Logo:",
+     choices = choices_labeled,
+     selected = avail_lens[1]
+   )
+ })
+ 
+ # 4C. Length-Stratified Sequence Logo
+ output$explore_cdr3_logo <- renderPlot({
+   ed <- explore_data()
+   req(ed, input$explore_logo_len)
+   target_len <- as.integer(input$explore_logo_len)
+   seqs <- ed$clone_df %>%
+     dplyr::filter(cdr3_length == target_len, !is.na(cdr3_active)) %>%
+     dplyr::pull(cdr3_active)
+   req(length(seqs) >= 1)
+   
+   ggseqlogo(seqs, method = input$explore_logo_method %||% "bits", seq_type = "aa") +
+     labs(
+       title = paste0(
+         toupper(input$explore_chain),
+         " Chain CDR3 Sequence Logo (Length = ",
+         target_len,
+         " aa, n = ",
+         length(seqs),
+         " clones)"
+       )
+     ) +
+     theme_minimal(base_size = 13)
+ })
+ 
+ # 5A. Nearest-Neighbor Distance vs. Clone Count Plot
+ output$explore_nn_plot <- renderPlotly({
+   ed <- explore_data()
+   req(ed)
+   sub_df <- ed$clone_df
+   
+   hover_txt <- paste0(
+     "<b>Active CDR3:</b> ", sub_df$cdr3_active,
+     "<br><b>Epitope:</b> ", sub_df$epitope,
+     "<br><b>Subject:</b> ", sub_df$subject,
+     "<br><b>Clone Count:</b> ", sub_df$count,
+     "<br><b>Nearest Neighbor Dist:</b> ", round(sub_df$nearest_neighbor_dist, 1),
+     "<br><b>Nearest Neighbor Epitope:</b> ", sub_df$nearest_neighbor_epitope,
+     "<br><b>Subjects Sharing CDR3:</b> ", sub_df$n_subjects_sharing_cdr3
+   )
+   
+   p <- ggplot(
+     sub_df,
+     aes(
+       x = nearest_neighbor_dist,
+       y = count,
+       color = epitope,
+       shape = clonotype_sharing,
+       text = hover_txt
+     )
+   ) +
+     geom_point(alpha = 0.8, size = 3) +
+     scale_y_log10() +
+     labs(
+       title = paste("Nearest-Neighbor TCR Distance vs. Clone Count (", input$explore_pw_matrix, ")"),
+       x = "Distance to Closest Neighbor TCR",
+       y = "Clone Count (log10 scale)",
+       color = "Epitope",
+       shape = "CDR3 Sharing"
+     ) +
+     theme_minimal(base_size = 12)
+   
+   ggplotly(p, tooltip = "text") %>% config(responsive = TRUE)
+ })
+ 
+ # 5B. Enriched Clonotype Table
+ output$explore_clones_table <- DT::renderDataTable({
+   ed <- explore_data()
+   req(ed)
+   sub_df <- ed$clone_df
+   
+   DT::datatable(
+     sub_df,
+     caption = "Filtered & Enriched TCRdist3 Clonotype Explorer Table",
+     extensions = "Buttons",
+     rownames = FALSE,
+     filter = "top",
+     options = list(
+       scrollX = TRUE,
+       pageLength = 10,
+       dom = "lfrtipB",
+       buttons = list(
+         "copy",
+         list(extend = "csv", text = "CSV", filename = paste0("TCRdist3-Explorer-", session$token)),
+         list(extend = "excel", text = "Excel", filename = paste0("TCRdist3-Explorer-", session$token))
+       )
+     )
+   )
+ }, server = TRUE)
+ 
 }
